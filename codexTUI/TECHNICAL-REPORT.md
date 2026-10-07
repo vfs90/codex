@@ -3,7 +3,8 @@
 Inspected and improved locally on 2026-10-05; resize smoothing verified on
 2026-10-06. Repository:
 `/home/vfs/codex-infobar`, branch `feat/top-infobar`. The native implementation is committed locally; publishing status is tracked
-in README.md. No upstream issue or PR was submitted. The Python launcher, terminal harness, and visual artifacts in this
+in README.md. [Feature request #51863](https://github.com/openai/codex/issues/51863)
+was submitted on 2026-10-07; no PR was submitted. The Python launcher, terminal harness, and visual artifacts in this
 review directory are development tools outside the product patch.
 
 ## 1. Changes made

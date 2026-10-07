@@ -168,7 +168,8 @@ The native implementation and review package are published on
 [vfs90/codex, branch `feat/top-infobar`](https://github.com/vfs90/codex/tree/feat/top-infobar).
 `top-infobar.patch` is the complete native feature. The earlier
 `infobar-polish.patch` remains in the original local review directory.
-No upstream issue or pull request was created.
+The feature request is [openai/codex#51863](https://github.com/openai/codex/issues/51863).
+No pull request was created.
 
 ## Resize smoothing follow-up
 

@@ -104,7 +104,8 @@ Restart the locally built CLI using:
 The launcher preserves its existing test-home settings. Resize while a response
 streams and while entering an unfinished prompt. The installed Codex executable
 is unchanged. The native feature is committed locally; see README.md for its commit and publishing status. Branch publication status is recorded
-in README.md; no upstream issue or pull request was created.
+in README.md. [Feature request #51863](https://github.com/openai/codex/issues/51863)
+was submitted on 2026-10-07; no pull request was created.
 
 ## Portable review package
 

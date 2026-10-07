@@ -4,7 +4,8 @@ This fork contains a working native `/infobar` prototype and supporting review
 material. The feature is optional and independent of the existing footer.
 
 **Published:** [vfs90/codex, branch `feat/top-infobar`](https://github.com/vfs90/codex/tree/feat/top-infobar).
-No upstream issue or pull request has been submitted.
+Feature request: [openai/codex#51863](https://github.com/openai/codex/issues/51863).
+No pull request has been submitted.
 
 - [Feature-request draft](FEATURE-REQUEST.md)
 - [Technical report with answers 1–14](TECHNICAL-REPORT.md)
@@ -101,8 +102,9 @@ licenses are documented in the technical report.
 
 The [current upstream contribution policy](https://github.com/openai/codex/blob/main/docs/contributing.md)
 welcomes feature requests and analysis through issues and excludes external code
-PRs. This package provides an implementation reference; no upstream issue or
-PR has been submitted by this workflow.
+PRs. This package provides an implementation reference for
+[feature request #51863](https://github.com/openai/codex/issues/51863), submitted
+on 2026-10-07. No PR has been submitted by this workflow.
 
 The portable launcher and loopback harness were also rerun from this review
 folder: both color and `NO_COLOR` runs passed 25 settled changes and 42 rapid
