@@ -33,6 +33,202 @@ pub(in crate::app) fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
     })
 }
 
+#[tokio::test]
+async fn infobar_stays_above_scrolled_transcript_and_yields_on_tiny_screens() -> Result<()> {
+    use crate::infobar::InfobarItem;
+    let mut app = crate::app::test_support::make_test_app().await;
+    attach_thread(&mut app, ThreadId::new());
+    app.chat_widget.set_infobar_reset_count(Some(3));
+    app.chat_widget
+        .setup_infobar(vec![InfobarItem::BankedResets]);
+    app.transcript_cells = vec![Arc::new(crate::history_cell::PlainHistoryCell::new(
+        (1..=40)
+            .map(|row| format!("Transcript row {row:02}").into())
+            .collect(),
+    ))];
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(true)?;
+    let mut snapshots = Vec::new();
+    for (width, height) in [(80, 16), (40, 12), (12, 12), (40, 3), (80, 16)] {
+        let size = Size::new(width, height);
+        tui.terminal.resize(size)?;
+        tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
+        app.chat_widget
+            .apply_external_edit("preserved draft".into());
+        let bottom = app.render_owned_transcript(&mut tui, size)?;
+        if bottom.y > 1 {
+            assert!(
+                buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+                    &tui.terminal
+                ))
+                .lines()
+                .next()
+                .unwrap()
+                .starts_with("Resets 3")
+            );
+            app.transcript_view.handle_key(
+                KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+                &app.transcript_cells,
+            );
+            tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
+            app.render_owned_transcript(&mut tui, size)?;
+            let rendered = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+                &tui.terminal,
+            ));
+            assert!(rendered.lines().next().unwrap().starts_with("Resets 3"));
+            snapshots.push(format!(
+                "{width}x{height}\n{}",
+                normalize_snapshot_paths(rendered)
+            ));
+        } else {
+            assert!(
+                !buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+                    &tui.terminal
+                ))
+                .contains("Resets 3")
+            );
+        }
+        assert_eq!(
+            app.chat_widget.composer_text_with_pending(),
+            "preserved draft"
+        );
+    }
+    insta::assert_snapshot!("infobar_scrolling_and_resizing", snapshots.join("\n\n"));
+    tui.set_owned_screen(false)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn infobar_wraps_during_resize_without_moving_input_or_losing_account_values() -> Result<()> {
+    use crate::bottom_pane::StatusLineItem;
+    use crate::infobar::InfobarItem;
+    use crate::token_usage::TokenUsage;
+    use crate::token_usage::TokenUsageInfo;
+    let mut app = crate::app::test_support::make_test_app().await;
+    attach_thread(&mut app, ThreadId::new());
+    app.chat_widget.set_token_info(Some(TokenUsageInfo {
+        total_token_usage: TokenUsage {
+            total_tokens: 900_000,
+            ..Default::default()
+        },
+        last_token_usage: TokenUsage {
+            total_tokens: 100_000,
+            ..Default::default()
+        },
+        model_context_window: Some(256_000),
+    }));
+    app.chat_widget.set_infobar_reset_count(Some(3));
+    app.chat_widget
+        .on_rate_limit_snapshot(Some(codex_app_server_protocol::RateLimitSnapshot {
+            limit_id: None,
+            limit_name: None,
+            normal_model_slug: None,
+            primary: Some(codex_app_server_protocol::RateLimitWindow {
+                used_percent: 25,
+                window_duration_mins: Some(5 * 60),
+                resets_at: None,
+            }),
+            secondary: Some(codex_app_server_protocol::RateLimitWindow {
+                used_percent: 60,
+                window_duration_mins: Some(7 * 24 * 60),
+                resets_at: None,
+            }),
+            credits: None,
+            individual_limit: None,
+            plan_type: None,
+            spend_control_reached: None,
+            rate_limit_reached_type: None,
+        }));
+    app.chat_widget.setup_infobar(vec![
+        InfobarItem::Status(StatusLineItem::ModelWithReasoning),
+        InfobarItem::Status(StatusLineItem::ContextRemaining),
+        InfobarItem::Status(StatusLineItem::FiveHourLimit),
+        InfobarItem::Status(StatusLineItem::WeeklyLimit),
+        InfobarItem::BankedResets,
+    ]);
+    app.chat_widget.apply_external_edit("draft".into());
+    app.transcript_cells = vec![Arc::new(crate::history_cell::PlainHistoryCell::new(
+        (1..=40)
+            .map(|row| format!("Transcript row {row:02}").into())
+            .collect(),
+    ))];
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(true)?;
+    let mut snapshots = Vec::new();
+    for (width, height) in [(160, 24), (80, 24), (40, 24), (20, 24), (40, 3), (160, 24)] {
+        let size = Size::new(width, height);
+        tui.terminal.resize(size)?;
+        tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
+        let bottom = app.render_owned_transcript(&mut tui, size)?;
+        let rendered = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+            &tui.terminal,
+        ));
+        if height > 3 {
+            let bar_height = app
+                .chat_widget
+                .infobar
+                .as_ref()
+                .unwrap()
+                .desired_height(width);
+            assert!(bar_height + 1 < bottom.y);
+            let bar = rendered
+                .lines()
+                .take(usize::from(bar_height))
+                .collect::<Vec<_>>()
+                .join("\n");
+            for field in [
+                "gpt-test",
+                "100K/256K",
+                "64% left",
+                "75% left",
+                "40% left",
+                "Resets 3",
+            ] {
+                assert!(
+                    bar.contains(field),
+                    "{width} columns missing {field}: {bar}"
+                );
+            }
+            let cursor = tui.terminal.last_known_cursor_pos;
+            assert!(cursor.x < width && cursor.y >= bottom.y && cursor.y < bottom.bottom());
+            assert!(
+                rendered
+                    .lines()
+                    .nth(usize::from(cursor.y))
+                    .unwrap()
+                    .contains("draft")
+            );
+            app.transcript_view.handle_key(
+                KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
+                &app.transcript_cells,
+            );
+            tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
+            app.render_owned_transcript(&mut tui, size)?;
+            let scrolled = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+                &tui.terminal,
+            ));
+            assert_eq!(
+                scrolled
+                    .lines()
+                    .take(usize::from(bar_height))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                bar
+            );
+        } else {
+            assert!(!rendered.contains("100K/256K"));
+        }
+        assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
+        snapshots.push(format!(
+            "{width}x{height}\n{}",
+            normalize_snapshot_paths(rendered)
+        ));
+    }
+    insta::assert_snapshot!("responsive_infobar_transcript", snapshots.join("\n\n"));
+    tui.set_owned_screen(false)?;
+    Ok(())
+}
+
 pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
     app.chat_widget.handle_thread_session(ThreadSessionState {
         daybreak_enabled: false,

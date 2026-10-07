@@ -383,6 +383,7 @@ mod windows_sandbox_prompts;
 use self::status_state::StatusIndicatorState;
 use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
+mod infobar;
 mod status_controls;
 mod status_surfaces;
 mod streaming;
@@ -719,6 +720,8 @@ pub(crate) struct ChatWidget {
     session_network_proxy: Option<SessionNetworkProxyRuntime>,
     // Shared latch so we only warn once about invalid status-line item IDs.
     status_line_invalid_items_warned: Arc<AtomicBool>,
+    pub(crate) infobar: Option<crate::infobar::Infobar>,
+    infobar_invalid_items_warned: bool,
     // Shared latch so we only warn once about invalid terminal-title item IDs.
     terminal_title_invalid_items_warned: Arc<AtomicBool>,
     // Last terminal title emitted, to avoid writing duplicate OSC updates.

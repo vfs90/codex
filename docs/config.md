@@ -6,6 +6,9 @@ For advanced configuration instructions, see [this documentation](https://develo
 
 For a full configuration reference, see [this documentation](https://developers.openai.com/codex/config-reference).
 
+Use `[tui].infobar` or `/infobar` to configure the optional top status bar. See
+[Top infobar](infobar.md) for its ordered field identifiers.
+
 ## Lifecycle hooks
 
 Admins can set top-level `allow_managed_hooks_only = true` in

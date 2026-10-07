@@ -63,6 +63,60 @@ fn render_frame(widget: &ChatWidget, width: u16) -> Buffer {
     buffer
 }
 
+#[tokio::test]
+async fn inline_infobar_wraps_and_yields_to_the_composer_on_short_viewports() {
+    use crate::infobar::InfobarItem;
+    let (mut widget, _, _) = widget_with_counting_cell(50, 50, true).await;
+    widget.set_token_info(Some(TokenUsageInfo {
+        total_token_usage: TokenUsage {
+            total_tokens: 900_000,
+            ..Default::default()
+        },
+        last_token_usage: TokenUsage {
+            total_tokens: 100_000,
+            ..Default::default()
+        },
+        model_context_window: Some(256_000),
+    }));
+    widget.set_infobar_reset_count(Some(3));
+    widget.setup_infobar(vec![
+        InfobarItem::Status(StatusLineItem::ContextRemaining),
+        InfobarItem::BankedResets,
+    ]);
+    widget.apply_external_edit("draft".into());
+    for width in [80, 40, 20, 80] {
+        let area = Rect::new(0, 0, width, 24);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+        let bar_height = widget.infobar.as_ref().unwrap().desired_height(width);
+        let bar = (0..bar_height)
+            .map(|y| (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            bar.contains("100K/256K") && bar.contains("64% left") && bar.contains("Resets 3"),
+            "{bar}"
+        );
+        let (x, y) = widget.cursor_pos(area).expect("visible composer cursor");
+        assert!(x < width && y >= bar_height && y < area.height);
+
+        let short_height = widget
+            .bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default())
+            .desired_height(width)
+            + 1;
+        let short_area = Rect::new(0, 0, width, short_height);
+        let mut with_bar = Buffer::empty(short_area);
+        widget.render(short_area, &mut with_bar);
+        let cursor = widget.cursor_pos(short_area);
+        let bar = widget.infobar.take();
+        let mut without_bar = Buffer::empty(short_area);
+        widget.render(short_area, &mut without_bar);
+        assert_eq!(with_bar, without_bar);
+        assert_eq!(cursor, widget.cursor_pos(short_area));
+        widget.infobar = bar;
+    }
+}
+
 fn contains_text(buffer: &Buffer, text: &str) -> bool {
     buffer
         .content
@@ -73,6 +127,144 @@ fn contains_text(buffer: &Buffer, text: &str) -> bool {
                 .collect::<String>()
                 .contains(text)
         })
+}
+
+#[tokio::test]
+async fn infobar_resize_during_streaming_preserves_prompt_entry_and_footer() {
+    use crate::infobar::InfobarItem;
+    use codex_app_server_protocol::RateLimitWindow;
+    let (mut widget, _, mut events, mut operations) = make_chatwidget_manual_with_sender().await;
+    widget.thread_id = Some(ThreadId::new());
+    widget.set_token_info(Some(TokenUsageInfo {
+        total_token_usage: TokenUsage::default(),
+        last_token_usage: TokenUsage {
+            total_tokens: 100_000,
+            ..Default::default()
+        },
+        model_context_window: Some(256_000),
+    }));
+    widget.on_rate_limit_snapshot(Some(RateLimitSnapshot {
+        limit_id: None,
+        limit_name: None,
+        normal_model_slug: None,
+        primary: Some(RateLimitWindow {
+            used_percent: 25,
+            window_duration_mins: Some(5 * 60),
+            resets_at: None,
+        }),
+        secondary: Some(RateLimitWindow {
+            used_percent: 60,
+            window_duration_mins: Some(7 * 24 * 60),
+            resets_at: None,
+        }),
+        credits: None,
+        individual_limit: None,
+        plan_type: None,
+        spend_control_reached: None,
+        rate_limit_reached_type: None,
+    }));
+    widget.setup_infobar(vec![
+        InfobarItem::Status(StatusLineItem::ModelWithReasoning),
+        InfobarItem::Status(StatusLineItem::ContextRemaining),
+        InfobarItem::Status(StatusLineItem::FiveHourLimit),
+        InfobarItem::Status(StatusLineItem::WeeklyLimit),
+        InfobarItem::BankedResets,
+    ]);
+    widget.set_infobar_reset_count(Some(0));
+    widget.refresh_status_surfaces();
+    widget.on_task_started();
+    let mut draft = String::new();
+    let mut committed_output = String::new();
+    for (step, width) in [
+        160, 110, 107, 106, 102, 101, 97, 96, 90, 40, 20, 40, 90, 96, 97, 101, 102, 106, 107, 110,
+        160,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        widget.on_agent_message_delta(format!("Stream line {step}\n"));
+        widget.on_commit_tick();
+        let ch = char::from(b'a' + step as u8);
+        widget.handle_key_event(crossterm::event::KeyCode::Char(ch).into());
+        // A non-text key flushes the composer's normal paste-burst buffer.
+        widget.handle_key_event(crossterm::event::KeyCode::End.into());
+        draft.push(ch);
+        assert!(widget.has_active_agent_stream());
+        assert_eq!(widget.composer_text_with_pending(), draft);
+        let area = Rect::new(0, 0, width, 24);
+        let mut buffer = Buffer::empty(area);
+        widget.render(area, &mut buffer);
+        let (x, y) = widget
+            .cursor_pos(area)
+            .expect("visible prompt while streaming");
+        assert!(x < width && y < area.height);
+        assert!(contains_text(&buffer, &draft));
+        let bar_height = widget.infobar.as_ref().unwrap().desired_height(width);
+        let header = buffer
+            .content
+            .chunks(usize::from(width))
+            .take(usize::from(bar_height))
+            .map(|row| {
+                row.iter()
+                    .map(ratatui::buffer::Cell::symbol)
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            header.contains("100K/256K") && header.contains("64% left"),
+            "{header}"
+        );
+        assert!(
+            header.contains("75% left") && header.contains("40% left"),
+            "{header}"
+        );
+        // The top strip does not replace or modify the native bottom surface.
+        let bottom =
+            widget.bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default());
+        let bottom_area = Rect::new(0, 0, width, bottom.desired_height(width));
+        let mut with_bar = Buffer::empty(bottom_area);
+        bottom.render(bottom_area, &mut with_bar);
+        drop(bottom);
+        let saved_bar = widget.infobar.take();
+        let mut without_bar = Buffer::empty(bottom_area);
+        widget
+            .bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default())
+            .render(bottom_area, &mut without_bar);
+        assert_eq!(with_bar, without_bar);
+        widget.infobar = saved_bar;
+        while let Ok(event) = events.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                committed_output.push_str(
+                    &cell
+                        .display_lines(width)
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                );
+            }
+        }
+    }
+    widget.finalize_completed_assistant_message(None);
+    while let Ok(event) = events.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            committed_output.push_str(
+                &cell
+                    .display_lines(160)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+    }
+    assert!(committed_output.contains("Stream line"));
+    assert_eq!(widget.composer_text_with_pending(), draft);
+    assert!(
+        operations.try_recv().is_err(),
+        "resizing and typing must not submit the draft"
+    );
 }
 
 #[tokio::test]

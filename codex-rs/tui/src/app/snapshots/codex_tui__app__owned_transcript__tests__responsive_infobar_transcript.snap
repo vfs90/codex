@@ -1,0 +1,139 @@
+---
+source: tui/src/app/owned_transcript_tests.rs
+assertion_line: 227
+expression: "snapshots.join(\"\\n\\n\")"
+---
+160x24
+gpt-test default · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
+Transcript row 24
+Transcript row 25
+Transcript row 26
+Transcript row 27
+Transcript row 28
+Transcript row 29
+Transcript row 30
+Transcript row 31
+Transcript row 32
+Transcript row 33
+Transcript row 34
+Transcript row 35
+Transcript row 36
+Transcript row 37
+Transcript row 38
+Transcript row 39
+Transcript row 40
+
+
+› draft
+
+  gpt-test default · /tmp/project
+
+
+80x24
+gpt-test default · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
+Resets 3
+Transcript row 08
+Transcript row 09
+Transcript row 10
+Transcript row 11
+Transcript row 12
+Transcript row 13
+Transcript row 14
+Transcript row 15
+Transcript row 16
+Transcript row 17
+Transcript row 18
+Transcript row 19
+Transcript row 20
+Transcript row 21
+Transcript row 22
+Transcript row 23
+                             ↓ Back to bottom · esc
+
+› draft
+
+  gpt-test default · /tmp/project
+  esc latest
+
+40x24
+gpt-test default
+Context 100K/256K 64% left · 5h 75% left
+weekly 40% left · Resets 3
+Transcript row 01
+Transcript row 02
+Transcript row 03
+Transcript row 04
+Transcript row 05
+Transcript row 06
+Transcript row 07
+Transcript row 08
+Transcript row 09
+Transcript row 10
+Transcript row 11
+Transcript row 12
+Transcript row 13
+Transcript row 14
+Transcript row 15
+         ↓ Back to bottom · esc
+
+› draft
+
+  gpt-test default · /tmp/project
+  esc latest
+
+20x24
+gpt-test default
+100K/256K 64% left
+5h 75% left
+weekly 40% left
+Resets 3
+Transcript row 01
+Transcript row 02
+Transcript row 03
+Transcript row 04
+Transcript row 05
+Transcript row 06
+Transcript row 07
+Transcript row 08
+Transcript row 09
+Transcript row 10
+Transcript row 11
+Transcript row 12
+Transcript row 13
+  ↓ Back to bottom
+
+› draft
+
+  gpt-test default …
+  esc latest
+
+40x3
+
+› draft
+
+
+160x24
+gpt-test default · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
+Transcript row 01
+Transcript row 02
+Transcript row 03
+Transcript row 04
+Transcript row 05
+Transcript row 06
+Transcript row 07
+Transcript row 08
+Transcript row 09
+Transcript row 10
+Transcript row 11
+Transcript row 12
+Transcript row 13
+Transcript row 14
+Transcript row 15
+Transcript row 16
+Transcript row 17
+                                                                     ↓ Back to bottom · esc
+
+› draft
+
+  gpt-test default · /tmp/project
+  esc latest

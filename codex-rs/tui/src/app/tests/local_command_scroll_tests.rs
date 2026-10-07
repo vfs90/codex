@@ -48,6 +48,35 @@ fn submit_local_command(app: &mut App, command: &str) {
 }
 
 #[tokio::test]
+async fn infobar_save_persists_order_and_hide_selection() -> Result<()> {
+    use crate::infobar::InfobarItem;
+    let (mut app, _, _) = make_test_app_with_channels().await;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let mut server = start_config_write_test_app_server(&app).await?;
+    for items in [
+        vec![
+            InfobarItem::BankedResets,
+            InfobarItem::Status(crate::bottom_pane::StatusLineItem::ModelName),
+        ],
+        vec![],
+    ] {
+        let expected = items.iter().map(ToString::to_string).collect::<Vec<_>>();
+        app.handle_event(&mut tui, &mut server, AppEvent::InfobarSetup { items })
+            .await?;
+        assert_eq!(app.local_settings.tui.infobar, Some(expected.clone()));
+        let saved: toml::Value = toml::from_str(&std::fs::read_to_string(
+            app.local_settings.user_config_path.as_path(),
+        )?)?;
+        assert_eq!(
+            saved["tui"]["infobar"],
+            toml::Value::Array(expected.into_iter().map(toml::Value::String).collect())
+        );
+    }
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -> Result<()> {
     let (mut app, mut events, _op_rx) = make_test_app_with_channels().await;
     let mut tui = crate::tui::test_support::make_test_tui()?;
@@ -68,6 +97,7 @@ async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -
         ("/memories", KeyCode::Esc),
         ("/title", KeyCode::Esc),
         ("/statusline", KeyCode::Esc),
+        ("/infobar", KeyCode::Esc),
     ] {
         while events.try_recv().is_ok() {}
         submit_local_command(&mut app, command);
@@ -135,6 +165,7 @@ async fn settings_picker_save_failures_reveal_their_errors() -> Result<()> {
             items: vec![],
             use_theme_colors: false,
         },
+        AppEvent::InfobarSetup { items: vec![] },
         AppEvent::TerminalTitleSetup { items: vec![] },
         AppEvent::PersistModelSelection {
             model: "gpt-5.5".into(),

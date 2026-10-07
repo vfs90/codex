@@ -1584,6 +1584,11 @@ pub(crate) enum AppEvent {
     /// Dismiss the status-line setup UI without changing config.
     StatusLineSetupCancelled,
 
+    /// Apply a user-confirmed top infobar selection and ordering.
+    InfobarSetup {
+        items: Vec<crate::infobar::InfobarItem>,
+    },
+
     /// Apply a user-confirmed terminal-title item ordering/selection.
     TerminalTitleSetup {
         items: Vec<TerminalTitleItem>,

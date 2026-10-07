@@ -396,6 +396,7 @@ impl ChatWidget {
             }
         } else {
             self.rate_limit_snapshots_by_limit_id.clear();
+            self.available_rate_limit_reset_credits = None;
             self.codex_rate_limit_reached_type = None;
             self.codex_spend_control_reached = None;
         }

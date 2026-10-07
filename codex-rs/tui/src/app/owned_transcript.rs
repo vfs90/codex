@@ -148,6 +148,16 @@ impl App {
         };
         drop(bottom);
         let available = screen_size.height.saturating_sub(bottom_height);
+        let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
+        let mut infobar_height = if dashboard_visible {
+            0
+        } else {
+            chat_widget
+                .infobar
+                .as_ref()
+                .map(|bar| bar.height(screen_size.width, transcript_bottom))
+                .unwrap_or_default()
+        };
         let mut bottom_area = Rect::new(
             /*x*/ 0,
             screen_size.height.saturating_sub(bottom_height),
@@ -158,7 +168,6 @@ impl App {
         let mut footer_height_changed = false;
         let mut feedback_tick = None;
         let mut blossom_tick = None;
-        let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
         tui.draw(screen_size.height, |frame| {
             ratatui::widgets::Clear.render(
                 Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, available),
@@ -167,9 +176,9 @@ impl App {
             let mut completion_tip_area = view.render_with_turn_tip_space(
                 Rect::new(
                     /*x*/ 0,
-                    /*y*/ 0,
+                    infobar_height,
                     transcript_width,
-                    transcript_bottom,
+                    transcript_bottom.saturating_sub(infobar_height),
                 ),
                 frame.buffer,
                 &self.transcript_cells,
@@ -223,12 +232,17 @@ impl App {
                 // their separator. Resizing must not preserve a stale return control.
                 ratatui::widgets::Clear.render(bottom_area, frame.buffer);
                 transcript_bottom = bottom_area.y;
+                infobar_height = chat_widget
+                    .infobar
+                    .as_ref()
+                    .map(|bar| bar.height(screen_size.width, transcript_bottom))
+                    .unwrap_or_default();
                 completion_tip_area = view.render_with_turn_tip_space(
                     Rect::new(
                         /*x*/ 0,
-                        /*y*/ 0,
+                        infobar_height,
                         transcript_width,
-                        transcript_bottom,
+                        transcript_bottom.saturating_sub(infobar_height),
                     ),
                     frame.buffer,
                     &self.transcript_cells,
@@ -248,6 +262,14 @@ impl App {
                     composer,
                     MotionMode::from_animations_enabled(self.local_settings.tui.animations),
                 );
+            if infobar_height > 0
+                && let Some(infobar) = &chat_widget.infobar
+            {
+                infobar.render(
+                    Rect::new(0, 0, screen_size.width, infobar_height),
+                    frame.buffer,
+                );
+            }
             bottom.render(bottom_area, frame.buffer);
             if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
                 tip.render(area, frame.buffer);

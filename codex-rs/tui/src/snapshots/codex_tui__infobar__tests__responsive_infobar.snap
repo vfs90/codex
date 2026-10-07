@@ -1,0 +1,57 @@
+---
+source: tui/src/infobar.rs
+assertion_line: 835
+expression: "snapshots.join(\"\\n\\n\")"
+---
+160 columns
+gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
+
+120 columns
+gpt-test high · Context 100K/256K [██████░░░] 64% left · 5h [███████░░] 75% left · weekly [███░░░░░] 40% left · Resets 3
+
+100 columns
+gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly [█░] 40% left · Resets 3
+
+99 columns
+gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
+
+98 columns
+gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
+
+95 columns
+gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
+
+94 columns
+gpt-test high · Context 100K/256K [█░] 64% left · 5h 75% left · weekly 40% left · Resets 3
+
+90 columns
+gpt-test high · Context 100K/256K [█░] 64% left · 5h 75% left · weekly 40% left · Resets 3
+
+89 columns
+gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left · Resets 3
+
+85 columns
+gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left · Resets 3
+
+84 columns
+gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
+Resets 3
+
+80 columns
+gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
+Resets 3
+
+40 columns
+gpt-test high
+Context 100K/256K 64% left · 5h 75% left
+weekly 40% left · Resets 3
+
+20 columns
+gpt-test high
+100K/256K 64% left
+5h 75% left
+weekly 40% left
+Resets 3
+
+160 columns
+gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3

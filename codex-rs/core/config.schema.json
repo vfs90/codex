@@ -4540,6 +4540,14 @@
           "description": "Own the fullscreen transcript, including scrolling, selection, and search. Defaults to `true`; alternate-screen restrictions take precedence.",
           "type": "boolean"
         },
+        "infobar": {
+          "default": null,
+          "description": "Ordered top infobar item identifiers. Unset or empty hides the bar. Use `/infobar` to select and reorder model, context, limits, reset times, banked resets, and the fields available in `/statusline`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "keymap": {
           "allOf": [
             {

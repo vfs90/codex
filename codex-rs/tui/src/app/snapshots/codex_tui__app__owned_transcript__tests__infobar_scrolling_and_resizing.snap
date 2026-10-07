@@ -1,0 +1,68 @@
+---
+source: tui/src/app/owned_transcript_tests.rs
+assertion_line: 94
+expression: "snapshots.join(\"\\n\\n\")"
+---
+80x16
+Resets 3
+Transcript row 24
+Transcript row 25
+Transcript row 26
+Transcript row 27
+Transcript row 28
+Transcript row 29
+Transcript row 30
+Transcript row 31
+Transcript row 32
+                             ↓ Back to bottom · esc
+
+› preserved draft
+
+  gpt-test default · /tmp/project
+  esc latest
+
+40x12
+Resets 3
+Transcript row 20
+Transcript row 21
+Transcript row 22
+Transcript row 23
+Transcript row 24
+         ↓ Back to bottom · esc
+
+› preserved draft
+
+  gpt-test default · /tmp/project
+  esc latest
+
+12x12
+Resets 3
+row 18
+Transcript
+row 19
+Transcript
+  ↓ Bottom
+
+› preserved
+  draft
+
+  gpt-test …
+  esc latest
+
+80x16
+Resets 3
+Transcript row 10
+Transcript row 11
+Transcript row 12
+Transcript row 13
+Transcript row 14
+Transcript row 15
+Transcript row 16
+Transcript row 17
+Transcript row 18
+                             ↓ Back to bottom · esc
+
+› preserved draft
+
+  gpt-test default · /tmp/project
+  esc latest

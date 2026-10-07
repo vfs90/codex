@@ -61,6 +61,7 @@ pub enum SlashCommand {
     DebugConfig,
     Title,
     Statusline,
+    Infobar,
     Theme,
     #[strum(to_string = "pets", serialize = "pet")]
     Pets,
@@ -123,6 +124,9 @@ impl SlashCommand {
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
+            SlashCommand::Infobar => {
+                "select and order model, usage, and reset information in the top bar"
+            }
             SlashCommand::Theme => "choose a syntax highlighting theme",
             SlashCommand::Pets => "choose or hide the terminal pet",
             SlashCommand::Ps => "list background terminals",
@@ -290,6 +294,7 @@ impl SlashCommand {
             | SlashCommand::Plugins
             | SlashCommand::Title
             | SlashCommand::Statusline
+            | SlashCommand::Infobar
             | SlashCommand::AutoReview
             | SlashCommand::Feedback
             | SlashCommand::Ide
@@ -352,6 +357,7 @@ mod tests {
         assert!(SlashCommand::Ide.available_during_task());
         assert!(SlashCommand::Title.available_during_task());
         assert!(SlashCommand::Statusline.available_during_task());
+        assert!(SlashCommand::Infobar.available_during_task());
         assert!(SlashCommand::Raw.available_during_task());
         assert!(SlashCommand::Raw.available_in_side_conversation());
         assert!(SlashCommand::Raw.supports_inline_args());

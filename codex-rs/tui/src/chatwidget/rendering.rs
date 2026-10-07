@@ -183,6 +183,10 @@ impl ChatWidget {
             None => RenderableItem::Owned(Box::new(())),
         };
         let mut flex = FlexRenderable::new();
+        if let Some(infobar) = &self.infobar {
+            // The fixed composer gets space first on short inline viewports.
+            flex.push(1, RenderableItem::Borrowed(infobar));
+        }
         flex.push(/*flex*/ 1, active_cell_renderable);
         for cell in self
             .realtime_conversation

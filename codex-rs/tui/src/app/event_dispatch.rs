@@ -1802,6 +1802,9 @@ impl App {
                     let rate_limit_reset_credits = response.rate_limit_reset_credits.clone();
                     let snapshots = if accepted
                     {
+                        self.chat_widget.set_infobar_reset_count(
+                            rate_limit_reset_credits.as_ref().map(|summary| summary.available_count),
+                        );
                         self.chat_widget.apply_usage_notice_read(request_id);
                         self.chat_widget.update_backend_banner(&response);
                         self.apply_backend_banner_fallback(app_server).await;
@@ -1913,6 +1916,7 @@ impl App {
                     }
                 }
                 }
+                self.chat_widget.refresh_status_surfaces();
                 if (accepted || matches!(
                     origin,
                     RateLimitRefreshOrigin::Recovery | RateLimitRefreshOrigin::ResetConsume { .. }
@@ -3209,6 +3213,31 @@ impl App {
                     .set_status_line_workspace_headline(request_id, result)
                 {
                     tui.frame_requester().schedule_frame();
+                }
+            }
+            AppEvent::InfobarSetup { items } => {
+                let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
+                let array = ids.iter().cloned().collect::<toml_edit::Array>();
+                let edit = crate::legacy_core::config::edit::ConfigEdit::SetPath {
+                    segments: vec!["tui".to_string(), "infobar".to_string()],
+                    value: toml_edit::Item::Value(array.into()),
+                };
+                match ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
+                    .with_edits([edit])
+                    .apply()
+                    .await
+                {
+                    Ok(()) => {
+                        self.local_settings.tui.infobar = Some(ids);
+                        self.chat_widget.setup_infobar(items);
+                    }
+                    Err(err) => {
+                        let error = format_config_error(&err);
+                        self.app_event_tx.send(AppEvent::FollowTranscript);
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to save infobar settings: {error}"
+                        ));
+                    }
                 }
             }
             AppEvent::StatusLineSetupCancelled => {

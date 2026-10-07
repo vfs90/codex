@@ -258,6 +258,8 @@ impl ChatWidget {
             instruction_source_paths: Vec::new(),
             session_network_proxy: None,
             status_line_invalid_items_warned,
+            infobar: None,
+            infobar_invalid_items_warned: false,
             terminal_title_invalid_items_warned,
             last_terminal_title: None,
             last_terminal_title_requires_action: false,

@@ -53,6 +53,115 @@ fn account_rate_limits_response(snapshot: RateLimitSnapshot) -> GetAccountRateLi
     }
 }
 
+#[tokio::test]
+async fn infobar_periodic_refresh_updates_resets_and_ignores_old_responses() -> Result<()> {
+    use crate::infobar::InfobarItem;
+    let (mut app, _, _) = make_test_app_with_channels().await;
+    app.chat_widget
+        .setup_infobar(vec![InfobarItem::BankedResets]);
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let mut server =
+        crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
+    let origin = RateLimitRefreshOrigin::Periodic;
+    let mut first_request = None;
+    for count in [3, 0] {
+        let (request_id, generation) = app
+            .rate_limit_refresh_state
+            .start(origin, &mut app.rate_limit_hard_stop_generation)
+            .unwrap();
+        first_request.get_or_insert((request_id, generation));
+        let mut response = account_rate_limits_response(rate_limit_snapshot(20, None, None));
+        response
+            .rate_limit_reset_credits
+            .as_mut()
+            .unwrap()
+            .available_count = count;
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::RateLimitsLoaded {
+                request_id,
+                origin,
+                hard_stop_generation: generation,
+                result: Ok(response),
+            },
+        )
+        .await?;
+        assert_eq!(
+            app.chat_widget
+                .infobar
+                .as_ref()
+                .map(|bar| bar.full_line().to_string()),
+            Some(format!("Resets {count}"))
+        );
+    }
+    let (request_id, generation) = first_request.unwrap();
+    let mut stale = account_rate_limits_response(rate_limit_snapshot(20, None, None));
+    stale
+        .rate_limit_reset_credits
+        .as_mut()
+        .unwrap()
+        .available_count = 99;
+    app.handle_event(
+        &mut tui,
+        &mut server,
+        AppEvent::RateLimitsLoaded {
+            request_id,
+            origin,
+            hard_stop_generation: generation,
+            result: Ok(stale),
+        },
+    )
+    .await?;
+    assert_eq!(
+        app.chat_widget
+            .infobar
+            .as_ref()
+            .map(|bar| bar.full_line().to_string()),
+        Some("Resets 0".into())
+    );
+    let mut missing = account_rate_limits_response(rate_limit_snapshot(100, None, None));
+    missing.rate_limit_reset_credits = None;
+    for (result, expected) in [
+        (
+            Err("transient read error".into()),
+            Some("Resets 0".to_string()),
+        ),
+        (Ok(missing), None),
+        (
+            Ok(account_rate_limits_response(rate_limit_snapshot(
+                0, None, None,
+            ))),
+            Some("Resets 0".to_string()),
+        ),
+    ] {
+        let (request_id, generation) = app
+            .rate_limit_refresh_state
+            .start(origin, &mut app.rate_limit_hard_stop_generation)
+            .unwrap();
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::RateLimitsLoaded {
+                request_id,
+                origin,
+                hard_stop_generation: generation,
+                result,
+            },
+        )
+        .await?;
+        assert_eq!(
+            app.chat_widget
+                .infobar
+                .as_ref()
+                .map(|bar| bar.full_line().to_string()),
+            expected
+        );
+    }
+    server.shutdown().await?;
+    Ok(())
+}
+
 async fn deliver_rolling_rate_limit_snapshot(
     app: &mut App,
     app_server: &AppServerSession,

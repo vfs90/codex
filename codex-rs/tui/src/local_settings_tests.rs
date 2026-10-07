@@ -8,6 +8,35 @@ use codex_terminal_detection::Multiplexer;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn infobar_survives_configuration_loading_and_reload() -> anyhow::Result<()> {
+    let home = tempfile::tempdir()?;
+    for selected in ["['banked-resets', 'model', 'weekly-limit']", "[]"] {
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!("[tui]\ninfobar = {selected}\n"),
+        )?;
+        let config = ConfigBuilder::default()
+            .codex_home(home.path().to_path_buf())
+            .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
+            .build()
+            .await?;
+        let local = LocalSettings::from(&config);
+        assert_eq!(local.tui.infobar, config.tui_infobar);
+        let expected = if selected == "[]" {
+            vec![]
+        } else {
+            vec![
+                "banked-resets".into(),
+                "model".into(),
+                "weekly-limit".into(),
+            ]
+        };
+        assert_eq!(local.tui.infobar, Some(expected));
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn launch_screen_mode_survives_configuration_reload() -> anyhow::Result<()> {
     use crate::transcript_mode::TranscriptMode;
     use codex_config::types::AltScreenMode;

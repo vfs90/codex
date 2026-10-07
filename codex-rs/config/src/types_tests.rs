@@ -2,6 +2,24 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn infobar_configuration_preserves_order_and_explicit_disable() {
+    let settings: Tui =
+        toml::from_str("infobar = ['banked-resets', 'model', 'weekly-limit']").unwrap();
+    assert_eq!(
+        settings.infobar,
+        Some(vec![
+            "banked-resets".into(),
+            "model".into(),
+            "weekly-limit".into()
+        ])
+    );
+    let hidden: Tui = toml::from_str("infobar = []").unwrap();
+    assert_eq!(hidden.infobar, Some(vec![]));
+    let unset: Tui = toml::from_str("").unwrap();
+    assert_eq!(unset.infobar, None);
+}
+
+#[test]
 fn mouse_scroll_speed_accepts_integer_and_fractional_multipliers() {
     for (value, expected) in [("1", 1.0), ("0.5", 0.5), ("3.0", 3.0)] {
         let tui: Tui = toml::from_str(&format!("mouse_scroll_speed = {value}")).unwrap();

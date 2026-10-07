@@ -1,4 +1,4 @@
-//! Status-line and terminal-title rendering helpers for `ChatWidget`.
+//! Footer, infobar, and terminal-title rendering helpers for `ChatWidget`.
 //!
 //! Keeping this logic in a focused submodule makes the additive title/status
 //! behavior easier to review without paging through the rest of `chatwidget.rs`.
@@ -45,40 +45,52 @@ const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX_HIDDEN: &str = "[ . ] Action Require
 #[derive(Debug)]
 /// Parsed status-surface configuration for one refresh pass.
 ///
-/// The status line and terminal title share some expensive or stateful inputs
+/// The footer, infobar, and terminal title share some expensive or stateful inputs
 /// (notably git branch lookup and invalid-item warnings). This snapshot lets one
-/// refresh pass compute those shared concerns once, then render both surfaces
+/// refresh pass compute those shared concerns once, then render all surfaces
 /// from the same selection set.
 struct StatusSurfaceSelections {
     status_line_items: Vec<StatusLineItem>,
+    infobar_items: Vec<crate::infobar::InfobarItem>,
+    invalid_infobar_items: Vec<String>,
     invalid_status_line_items: Vec<String>,
     terminal_title_items: Vec<TerminalTitleItem>,
     invalid_terminal_title_items: Vec<String>,
 }
 
 impl StatusSurfaceSelections {
+    fn shared_status_items(&self) -> impl Iterator<Item = StatusLineItem> + '_ {
+        self.status_line_items.iter().copied().chain(
+            self.infobar_items
+                .iter()
+                .filter_map(|item| item.status_item()),
+        )
+    }
+
     fn uses_git_branch(&self) -> bool {
-        self.status_line_items.contains(&StatusLineItem::GitBranch)
+        self.shared_status_items()
+            .any(|item| item == StatusLineItem::GitBranch)
             || self
                 .terminal_title_items
                 .contains(&TerminalTitleItem::GitBranch)
     }
 
     fn uses_git_summary(&self) -> bool {
-        self.status_line_items
-            .contains(&StatusLineItem::PullRequestNumber)
-            || self
-                .status_line_items
-                .contains(&StatusLineItem::BranchChanges)
+        self.shared_status_items().any(|item| {
+            matches!(
+                item,
+                StatusLineItem::PullRequestNumber | StatusLineItem::BranchChanges
+            )
+        })
     }
 
     fn uses_workspace_headline(&self) -> bool {
-        self.status_line_items
-            .contains(&StatusLineItem::WorkspaceHeadline)
+        self.shared_status_items()
+            .any(|item| item == StatusLineItem::WorkspaceHeadline)
     }
 
     fn uses_thread_usage(&self) -> bool {
-        self.status_line_items.iter().any(|item| {
+        self.shared_status_items().any(|item| {
             matches!(
                 item,
                 StatusLineItem::ThreadCredits | StatusLineItem::EstimatedThreadCost
@@ -108,7 +120,10 @@ impl ChatWidget {
         let (status_line_items, invalid_status_line_items) = self.status_line_items_with_invalids();
         let (terminal_title_items, invalid_terminal_title_items) =
             self.terminal_title_items_with_invalids();
+        let (infobar_items, invalid_infobar_items) = self.infobar_items_with_invalids();
         StatusSurfaceSelections {
+            infobar_items,
+            invalid_infobar_items,
             status_line_items,
             invalid_status_line_items,
             terminal_title_items,
@@ -292,10 +307,10 @@ impl ChatWidget {
         }
     }
 
-    /// Recomputes both status surfaces from one shared config snapshot.
+    /// Recomputes all status surfaces from one shared config snapshot.
     ///
-    /// This is the common refresh entrypoint for the footer status line and the
-    /// terminal title. It parses both configurations once, emits invalid-item
+    /// This is the common refresh entrypoint for the footer, infobar, and
+    /// terminal title. It parses their configurations once, emits invalid-item
     /// warnings once, synchronizes shared cached state (such as git-branch
     /// lookup), then renders each surface from that shared snapshot.
     pub(crate) fn refresh_status_surfaces(&mut self) {
@@ -306,6 +321,7 @@ impl ChatWidget {
         self.warn_invalid_terminal_title_items_once(&selections.invalid_terminal_title_items);
         self.sync_status_surface_shared_state(&selections);
         self.refresh_status_line_from_selections(&selections);
+        self.refresh_infobar(&selections.infobar_items, &selections.invalid_infobar_items);
         self.refresh_terminal_title_from_selections(&selections);
     }
 
@@ -401,7 +417,7 @@ impl ChatWidget {
         if self.local_settings.tui.animations
             && self.local_settings.tui.effects.progress
             && self.status_state.thread_title_generation_pending
-            && (selections.status_line_items.iter().any(|item| {
+            && (selections.shared_status_items().any(|item| {
                 matches!(
                     item,
                     StatusLineItem::ThreadName
@@ -659,10 +675,7 @@ impl ChatWidget {
     pub(super) fn refresh_status_line_if_workspace_headline_due(&mut self) {
         let now = Instant::now();
         if self.status_line_workspace_headline_should_fetch(now)
-            && self
-                .status_line_items_with_invalids()
-                .0
-                .contains(&StatusLineItem::WorkspaceHeadline)
+            && self.status_surface_selections().uses_workspace_headline()
         {
             self.refresh_status_line();
         }
@@ -692,10 +705,7 @@ impl ChatWidget {
         }
 
         if !self.status_line_workspace_messages_disabled
-            && self
-                .status_line_items_with_invalids()
-                .0
-                .contains(&StatusLineItem::WorkspaceHeadline)
+            && self.status_surface_selections().uses_workspace_headline()
         {
             self.frame_requester
                 .schedule_frame_in(crate::workspace_messages::WORKSPACE_HEADLINE_REFRESH_INTERVAL);
@@ -1116,7 +1126,7 @@ impl ChatWidget {
     }
 }
 
-fn five_hour_status_window(
+pub(super) fn five_hour_status_window(
     snapshot: &RateLimitSnapshotDisplay,
 ) -> Option<(&RateLimitWindowDisplay, bool)> {
     find_primary_codex_window(snapshot, "5h")
@@ -1125,7 +1135,7 @@ fn five_hour_status_window(
         .or_else(|| non_weekly_secondary_window_when_primary_is_weekly(snapshot))
 }
 
-fn weekly_status_window(
+pub(super) fn weekly_status_window(
     snapshot: &RateLimitSnapshotDisplay,
 ) -> Option<(&RateLimitWindowDisplay, bool)> {
     find_codex_window(snapshot, "weekly")
@@ -1255,7 +1265,9 @@ fn approval_mode_display(config: &Config) -> String {
     config.permissions.approval_policy.value().to_string()
 }
 
-fn parse_items_with_invalids<T>(ids: impl IntoIterator<Item = String>) -> (Vec<T>, Vec<String>)
+pub(super) fn parse_items_with_invalids<T>(
+    ids: impl IntoIterator<Item = String>,
+) -> (Vec<T>, Vec<String>)
 where
     T: std::str::FromStr,
 {

@@ -895,6 +895,12 @@ pub struct Tui {
     #[serde(default)]
     pub status_line: Option<Vec<String>>,
 
+    /// Ordered top infobar item identifiers. Unset or empty hides the bar.
+    /// Use `/infobar` to select and reorder model, context, limits, reset times,
+    /// banked resets, and the fields available in `/statusline`.
+    #[serde(default)]
+    pub infobar: Option<Vec<String>>,
+
     /// Color status line items with colors derived from the active syntax theme.
     /// Defaults to `true`.
     #[serde(default = "default_true")]
