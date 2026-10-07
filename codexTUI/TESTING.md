@@ -152,21 +152,22 @@ for input and transcript cause the header to yield its area. Forced presentation
 modes remain optional follow-up work. No upstream approval or acceptance is
 claimed.
 
-## Try the local build before publishing
+## Try the local build
 
 ```bash
-/home/vfs/codex-infobar-review/run-local.sh login
-/home/vfs/codex-infobar-review/run-local.sh
+./codexTUI/run-local.sh login
+./codexTUI/run-local.sh
 ```
 
-The launcher uses `/home/vfs/codex-infobar-review/test-home`, retaining its
-existing settings. It does not replace the installed Codex binary. `/infobar`
+Run these commands from the repository root after building the native CLI.
+The launcher uses `codexTUI/test-home`, retaining its existing settings.
+It does not replace the installed Codex binary. `/infobar`
 opens the picker, Enter saves, Esc cancels, and clearing all fields hides it.
 Use `/status` and `/usage` for a live-account comparison after signing in.
-The native implementation is committed locally. `top-infobar.patch` is the complete
-feature and `infobar-polish.patch` is the refinement of the inspected baseline.
-The native feature has been committed locally and a public fork exists at
-https://github.com/vfs90/codex. Branch publication status is recorded in README.md.
+The native implementation and review package are published on
+[vfs90/codex, branch `feat/top-infobar`](https://github.com/vfs90/codex/tree/feat/top-infobar).
+`top-infobar.patch` is the complete native feature. The earlier
+`infobar-polish.patch` remains in the original local review directory.
 No upstream issue or pull request was created.
 
 ## Resize smoothing follow-up

@@ -3,7 +3,8 @@
 This fork contains a working native `/infobar` prototype and supporting review
 material. The feature is optional and independent of the existing footer.
 
-**Publication status: prepared locally; awaiting authenticated push to this fork.**
+**Published:** [vfs90/codex, branch `feat/top-infobar`](https://github.com/vfs90/codex/tree/feat/top-infobar).
+No upstream issue or pull request has been submitted.
 
 - [Feature-request draft](FEATURE-REQUEST.md)
 - [Technical report with answers 1–14](TECHNICAL-REPORT.md)
@@ -17,7 +18,7 @@ material. The feature is optional and independent of the existing footer.
 
 Upstream base: `3e238776e857eccd3bde6bff3026e2e9798f6524` (2026-10-03).
 Native feature commit: `04b8a18552fb5f93e5e88abb44a7b5f93575b320`.
-Branch: `feat/top-infobar`; target fork: [vfs90/codex](https://github.com/vfs90/codex).
+Branch: `feat/top-infobar`; public fork: [vfs90/codex](https://github.com/vfs90/codex).
 
 ## Demonstrations
 
