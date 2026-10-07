@@ -1,0 +1,1 @@
+PASS: native CLI, 25 settled size changes and 42 rapid resizes, streaming loopback fixture, draft preserved, picker opened; NO_COLOR=False; two conversation requests plus existing title generation; no extra requests during resize.

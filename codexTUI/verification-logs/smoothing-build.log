@@ -1,0 +1,4 @@
+   Compiling codex-tui v0.0.0 (/work/codex-rs/tui)
+   Compiling codex-cloud-tasks v0.0.0 (/work/codex-rs/cloud-tasks)
+   Compiling codex-cli v0.0.0 (/work/codex-rs/cli)
+    Finished `dev` profile [unoptimized] target(s) in 49.35s

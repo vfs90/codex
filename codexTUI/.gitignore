@@ -1,0 +1,12 @@
+codexTUI.gif
+.venv/
+test-home/
+smoke-work/
+color/
+no-color/
+__pycache__/
+tools/__pycache__/
+!verification-logs/
+!verification-logs/*.log
+!smoke-color-smoothing.log
+!smoke-no-color-smoothing.log

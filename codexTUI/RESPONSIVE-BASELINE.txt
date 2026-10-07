@@ -1,0 +1,32 @@
+Responsive infobar examples from deterministic rendering tests.
+These are fixture values, not live account usage.
+
+160 columns
+gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
+
+120 columns
+gpt-test high · Context 100K/256K [███░░] 64% left · 5h [████░] 75% left · weekly [██░░░] 40% left · Resets 3
+
+100 columns
+gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left
+weekly [████░░░░░░] 40% left · Resets 3
+
+80 columns
+gpt-test high · Context 100K/256K [██████░░░░] 64% left
+5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
+
+40 columns
+gpt-test high
+Context 100K/256K [██████░░░░] 64% left
+5h [████████░░] 75% left
+weekly [████░░░░░░] 40% left · Resets 3
+
+20 columns
+gpt-test high
+100K/256K 64% left
+5h [█████░] 75% left
+weekly [█░] 40% left
+Resets 3
+
+160 columns
+gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3

@@ -1,0 +1,258 @@
+    Finished `test` profile [unoptimized] target(s) in 1.05s
+     Running unittests src/lib.rs (target/debug/deps/codex_tui-5c91714f73271338)
+
+running 164 tests
+test analytics::report_data::tests::typed_usage_preserves_missing_counts_and_supplied_zero ... ok
+test analytics::normalize::tests::credit_timestamps_and_legacy_model_usage_follow_app_fallbacks ... ok
+test app::agents_overview::tests::usage::incomplete_billing_groups_do_not_display_partial_token_totals ... ok
+test analytics::tests::analytics_usage_ranks_its_own_models_after_turns_load ... ok
+Conversation›Ask Codex to do anythingGPT-5.6-Soldefault·/tmp/project?forshortcutsC⚠ Heads up, you have less than 10% of your 5h limit left. Run /status for abreakdown.⚠ 5h limit: 8% left · /status⚠1warning·f2toviewConversationrow16Conversationrow17Conversationrow18Conversationrow19•Working(0s • esc to interrupt)›draftstaysGPT-5.6-Soldefault·/tmp/projecttabtoqueuemessageC ⚠ Heads up, you have less than 5% of your 5h limit left. Run /status for a  breakdown. •Working(0s • esc to interrupt) ⚠ 5h limit: only 2% left · /statusConversationrow19 ⚠ Heads up, you have less than 5% of your 5h limit left. Run /status for abreakdown. •Working(0s • esc to interrupt)Conversationrow18Conversationrow19•Working(0s • esc to interrup…›draftstaysGPT-5.6-Soldefault·/tmp/pr…tabtoqueuemessageC  Run /status for a breakdown. •Working(0s • esc to interrup… ⚠ 5h <1% left5% of your 5h limit left.Run /status for a breakdown. •Working(0s • esc to interrup…Conversationrow19•Working(0s • e…›draftstaysGPT-5.6-Soldef…tabtoqueuemesC  a breakdown. •Working(0s • e… ⚠ 5h 5% leftRun /status fora breakdown. •Working(0s • e…Conversationrow15Conversationrow16Conversationrow17Conversationrow18Conversationrow19•Working(0s • esc to interrupt)• Queuedfollow-upinputs  ↳ queued follow-up⇧← edit last queued message›draftstayssecondlineGPT-5.6-Soldefault·/tmp/projecttabtoqueuemessageC89 ⚠ Heads up, you have less than 5% of your 5h limit left. Run /status for a  breakdown.⚠ 5h limit: only 2% left · /status•Working(0s • esc to interrupt)• Queuedfollow-upinputs  ↳ queued follow-up⇧← edit last queued message›draftstayssecondlineGPT-5.6-Soldefault·/tmp/projecttabtoqueuemessage••Working(0s • esc to interrupt)›draftstaysGPT-5.6-Soldefault·/tmp/projecttabtoqueuemessage•test app::composer_hints::tests::usage_notice_preserves_composer_geometry_on_recovery ... ok
+test app::composer_hints::tests::usage_notice_yields_to_interactions_and_blocking_banners ... ok
+test app::agents_overview::tests::usage::selected_usage_is_cached_and_account_changes_discard_old_results ... ok
+test app::background_requests::tests::fetch_thread_usage_uses_app_server_auth_after_persisted_account_changes ... ok
+
+/status
+
+  >_ OpenAI Codex (v0.0.0)
+
+  Visit ]8;;https://chatgpt.com/settings/usagehttps://chatgpt.com/settings/usage]8;; for up-to-date
+  information on rate limits and credits
+
+  Model:               gpt-test (reasoning none, summaries auto)
+  Model provider:      test-provider
+  Directory:           /tmp/project
+  Permissions:         Read Only (never)
+  Agents.md:           <none>
+  Collaboration mode:  Default
+  Session:             01a10de4-ea10-71b1-abd7-0805c20f85c6
+
+  Token usage:         0 total  (0 input + 0 output)
+  Limits:              data not available yettest app::tests::local_command_scroll_tests::usage_picker_opens_analytics_without_moving_the_background_transcript ... ok
+test app::tests::thread_usage::account_change_discards_thread_usage_deferred_while_overlay_is_open ... ok
+test app::tests::thread_usage::account_updated_with_backend_only_auth_enables_thread_usage ... ok
+
+/status
+
+  >_ OpenAI Codex (v0.0.0)
+
+  Visit ]8;;https://chatgpt.com/settings/usagehttps://chatgpt.com/settings/usage]8;; for up-to-date
+  information on rate limits and credits
+
+  Model:               gpt-test (reasoning none, summaries auto)
+  Model provider:      test-provider
+  Directory:           /tmp/project
+  Permissions:         Read Only (never)
+  Agents.md:           <none>
+  Collaboration mode:  Default
+  Session:             01a10de4-eb65-7a51-8483-7f5b77f42c81
+
+  Token usage:         0 total  (0 input + 0 output)
+  Limits:              data not available yet
+
+  Thread usage:        50 credits · ~$1.82test app::tests::thread_usage::completed_thread_usage_updates_status_without_scrollback_reflow ... ok
+test app::tests::thread_usage::failed_thread_usage_after_intervening_history_does_not_duplicate_status ... ok
+test app::tests::thread_usage::queued_status_reads_refreshed_usage_only_when_emitted ... ok
+
+/status
+
+  >_ OpenAI Codex (v0.0.0)
+
+  Visit ]8;;https://chatgpt.com/settings/usagehttps://chatgpt.com/settings/usage]8;; for
+  up-to-date
+  information on rate limits and credits
+
+  Model:               gpt-test (reasoning none,
+                       summaries auto)
+  Model provider:      test-provider
+  Directory:           /tmp/project
+  Permissions:         Read Only (never)
+  Agents.md:           <none>
+  Collaboration mode:  Default
+  Session:
+                       01a10de4-ecd1-7090-b977-d4d3a
+                       b9d56c1
+
+  Token usage:         0 total  (0 input + 0 output)
+  Limits:              data not available yet
+
+  Thread usage:        50 credits · ~$1.82test analytics::client::tests::legacy_usage_falls_back_to_surface_for_attribution_only_groupings ... ok
+test app::tests::thread_usage::terminal_reflow_rebases_pending_status_update_to_new_width ... ok
+test bottom_pane::slash_commands::tests::usage_command_exact_lookup_still_resolves_when_account_token_activity_is_disabled ... ok
+test bottom_pane::slash_commands::tests::usage_command_is_hidden_from_input_when_account_token_activity_is_disabled ... ok
+test bottom_pane::status_line_setup::tests::context_used_accepts_context_usage_legacy_id ... ok
+
+/status
+
+  >_ OpenAI Codex (v0.0.0)
+
+  Visit ]8;;https://chatgpt.com/settings/usagehttps://chatgpt.com/settings/usage]8;; for up-to-date
+  information on rate limits and credits
+
+  Model:               gpt-test (reasoning none, summaries auto)
+  Model provider:      test-provider
+  Directory:           /tmp/project
+  Permissions:         Read Only (never)
+  Agents.md:           <none>
+  Collaboration mode:  Default
+  Session:             01a10de4-ed58-7d80-90cc-89c32e61788e
+
+  Token usage:         0 total  (0 input + 0 output)
+  Limits:              data not available yet
+
+  Thread usage:        50 credits · ~$1.82test bottom_pane::status_line_setup::tests::setup_view_snapshot_includes_thread_usage_items ... ok
+test bottom_pane::status_line_setup::tests::thread_usage_items_are_independently_selectable ... ok
+test bottom_pane::status_line_style::tests::thread_usage_items_share_an_accent_and_secondary_separator ... ok
+test bottom_pane::title_setup::tests::thread_usage_items_are_independently_selectable ... ok
+test chatwidget::goal_status::tests::active_goal_usage_prefers_token_budget ... ok
+test chatwidget::goal_status::tests::active_goal_usage_reports_time_without_budget ... ok
+test chatwidget::goal_status::tests::completed_goal_usage_reports_time_without_token_budget ... ok
+test chatwidget::goal_status::tests::completed_goal_usage_reports_tokens_when_budgeted ... ok
+test chatwidget::goal_status::tests::stopped_goal_budget_usage_omits_unbudgeted_usage ... ok
+test chatwidget::goal_status::tests::stopped_goal_budget_usage_reports_budgeted_tokens ... ok
+test chatwidget::infobar::tests::infobar_workspace_headline_refresh_uses_shared_cache_and_interval ... ok
+test app::tests::token_usage_update_refreshes_status_line_with_runtime_context_window ... ok
+test app::tests::thread_usage::thread_usage_after_intervening_history_appends_refreshed_status ... ok
+test chatwidget::tests::goal_menu::goal_menu_usage_limited_snapshot ... ok
+test chatwidget::tests::luna_reserve_usage_tests::luna_reserve_prompt_preserves_the_composer_palette_on_exit ... ok
+Snapshot test passes but the existing value is in a legacy format. Please run `cargo insta test --force-update-snapshots` to update to a newer format. Snapshot contents:
+
+› Ask Codex to do anything
+
+  Luna Reserve default · /tmp/project
+Snapshot test passes but the existing value is in a legacy format. Please run `cargo insta test --force-update-snapshots` to update to a newer format. Snapshot contents:
+
+› Ask Codex to do anything
+
+  Luna Reserve default · /tmp/pro…
+test chatwidget::tests::luna_reserve_usage_tests::luna_reserve_status_tracks_the_active_model ... ok
+test chatwidget::tests::luna_reserve_usage_tests::luna_reserve_usage_survives_banner_dismissal_and_typing_during_a_turn ... ok
+test chatwidget::tests::plan_mode::plan_implementation_popup_context_usage_snapshot ... ok
+test chatwidget::tests::luna_reserve_usage_tests::luna_reserve_selector_supports_arrows_enter_shortcuts_and_escape_without_losing_draft ... ok
+test app::tests::thread_usage::thread_usage_finishing_during_overlay_updates_history_after_close ... ok
+test chatwidget::tests::slash_commands::goal_control_slash_command_without_thread_shows_full_usage ... ok
+test chatwidget::tests::slash_commands::signed_out_usage_command_reports_chatgpt_login_requirement ... ok
+test chatwidget::tests::slash_commands::raw_slash_command_reports_usage_for_invalid_arg ... ok
+test chatwidget::tests::slash_commands::signed_out_usage_command_with_args_reports_chatgpt_login_requirement ... ok
+test chatwidget::tests::security_setup_tests::security_setup_dismissal_survives_usage_banner_replacement ... ok
+test chatwidget::tests::slash_commands::slash_keymap_invalid_args_show_usage ... ok
+test chatwidget::tests::slash_commands::slash_mcp_invalid_args_show_usage ... ok
+test chatwidget::tests::slash_commands::usage_command_runs_with_backend_auth_from_widget_init ... ok
+test chatwidget::tests::slash_commands::usage_command_runs_with_backend_auth_without_chatgpt_account_flag ... ok
+test chatwidget::tests::slash_commands::usage_command_with_invalid_view_reports_usage_snapshot ... ok
+test chatwidget::tests::slash_commands::usage_error_slash_command_is_available_from_local_recall ... ok
+test chatwidget::tests::slash_commands::usage_views_open_the_requested_summary_mode ... ok
+test chatwidget::tests::status_and_layout::account_update_clears_derived_usage_limit_state_and_prompt ... ok
+test chatwidget::tests::status_and_layout::account_update_clears_workspace_headline_state ... ok
+test chatwidget::tests::status_and_layout::account_update_discards_stale_workspace_headline_results ... ok
+test chatwidget::tests::status_and_layout::interrupted_turn_refreshes_estimated_thread_usage ... ok
+test chatwidget::tests::status_and_layout::failed_turn_refreshes_estimated_thread_usage ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_clear_workspace_limit_from_authoritative_snapshot ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_follow_workspace_credit_flags ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_keep_explicit_rolling_workspace_limit ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_keep_newly_reached_workspace_limit ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_preserve_and_clear_spend_control_state ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_early_threshold_is_scoped_and_deduplicated ... ok
+test chatwidget::tests::status_and_layout::resumed_session_hides_unknown_token_usage_until_an_update_arrives ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_show_when_authoritative_snapshot_clears_credits ... ok
+test chatwidget::tests::status_and_layout::status_line_legacy_context_usage_renders_context_used_percent ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_preserve_workspace_limit_for_sparse_snapshots ... ok
+test chatwidget::tests::status_and_layout::status_line_workspace_headline_omits_when_unavailable ... ok
+test chatwidget::tests::status_and_layout::status_line_workspace_headline_renders_cached_value ... ok
+test chatwidget::tests::status_and_layout::terminal_title_thread_usage_fetches_and_renders_without_status_line ... ok
+test chatwidget::tests::status_and_layout::terminal_title_and_status_line_share_one_thread_usage_request ... ok
+test chatwidget::tests::status_and_layout::usage_limit_error_remaps_stale_member_credits_state_to_usage_limit_prompt ... ok
+test chatwidget::tests::status_and_layout::token_usage_update_uses_runtime_context_window ... ok
+test chatwidget::tests::status_and_layout::workspace_headline_fetch_allows_backend_auth_without_chatgpt_account ... ok
+test chatwidget::tests::status_and_layout::workspace_headline_update_applies_feature_disabled_result ... ok
+test chatwidget::tests::status_and_layout::workspace_member_usage_limit_prompts_and_sends_usage_limit ... ok
+test chatwidget::tests::status_and_layout::workspace_headline_update_applies_available_headline ... ok
+test chatwidget::tests::status_and_layout::workspace_owner_usage_limit_nudge_completion_renders_feedback ... ok
+test chatwidget::tests::status_and_layout::rate_limit_usage_warnings_keep_workspace_limit_after_rolling_credits ... ok
+test chatwidget::tests::status_command_tests::status_command_drops_stale_usd_when_updated_usage_has_only_credits ... ok
+test chatwidget::tests::status_command_tests::status_command_remains_visible_when_account_changes_during_usage_refresh ... ok
+test chatwidget::tests::status_command_tests::status_command_remains_visible_when_thread_changes_during_usage_refresh ... ok
+test chatwidget::tests::status_command_tests::status_command_requests_thread_usage_for_remote_connection_metadata ... ok
+test chatwidget::tests::status_command_tests::status_command_requests_thread_usage_with_backend_only_authentication ... ok
+test chatwidget::tests::status_command_tests::status_command_omits_thread_usage_for_non_cbp_enterprise_plans ... ok
+test chatwidget::tests::status_command_tests::status_command_stays_visible_and_updates_after_thread_usage_retry ... ok
+test chatwidget::tests::status_surface_previews::status_surface_preview_lines_thread_usage_snapshot ... ok
+test chatwidget::tests::status_surface_previews::status_line_setup_popup_workspace_headline_snapshot ... ok
+test chatwidget::tests::usage::account_change_dismisses_reset_popup_beneath_overlay ... ok
+test chatwidget::tests::usage::account_change_invalidates_pending_reset_requests ... ok
+test chatwidget::tests::status_surface_previews::status_surface_thread_usage_previews_omit_unavailable_usd_estimates ... ok
+test chatwidget::tests::status_surface_previews::terminal_title_setup_popup_thread_usage_snapshot ... ok
+test chatwidget::tests::usage::already_redeemed_is_an_idempotent_success ... ok
+test chatwidget::tests::usage::account_update_invalidates_usage_menu_refresh_when_visible_state_is_unchanged ... ok
+test chatwidget::tests::usage::failed_post_consume_refresh_does_not_keep_stale_reset_count ... ok
+test chatwidget::tests::usage::clearing_pending_reset_hint_preserves_in_flight_redemption ... ok
+test chatwidget::tests::usage::rate_limit_reset_confirmation_can_use_reset ... ok
+test chatwidget::tests::usage::no_credit_outcome_disables_reset_entry_in_usage_menu ... ok
+test chatwidget::tests::usage::opening_rate_limit_reset_flow_invalidates_in_flight_startup_hint ... ok
+test chatwidget::tests::usage::rate_limit_reset_confirmation_no_and_escape_return_to_picker ... ok
+test chatwidget::tests::usage::rate_limit_reset_confirmation_uses_backend_copy_snapshot ... ok
+test chatwidget::tests::usage::rate_limit_reset_load_result_updates_popup_beneath_overlay ... ok
+test chatwidget::tests::usage::rate_limit_reset_picker_starts_with_soonest_expiries_and_keeps_all_rows_reachable ... ok
+test chatwidget::tests::usage::rate_limit_reset_picker_wraps_expiry_details_snapshot ... ok
+test chatwidget::tests::usage::rate_limit_reset_redemption_allows_ctrl_c_to_quit_while_in_flight ... ok
+test chatwidget::tests::usage::rate_limit_reset_redemption_cannot_be_dismissed_while_in_flight ... ok
+test chatwidget::tests::usage::reset_credit_options_use_generic_copy_when_backend_copy_is_missing ... ok
+test chatwidget::tests::usage::rate_limit_reset_retry_reuses_idempotency_key ... ok
+test chatwidget::tests::usage::rate_limit_reset_success_updates_popup_beneath_overlay ... ok
+test chatwidget::tests::usage::rate_limit_reset_popup_states_snapshot ... ok
+test chatwidget::tests::usage::startup_check_shows_available_reset_hint_snapshot ... ok
+test chatwidget::tests::usage::startup_check_omits_reset_hint_when_none_are_available ... ok
+test chatwidget::tests::usage::starting_rate_limit_reset_redemption_clears_deferred_startup_hint ... ok
+test chatwidget::tests::usage::reset_picker_allows_only_one_pending_confirmation ... ok
+test chatwidget::tests::usage::startup_check_shows_reset_hint_for_workspace_account_with_credit ... ok
+test chatwidget::tests::usage::startup_reset_hint_waits_for_active_output_snapshot ... ok
+test chatwidget::tests::usage::usage_command_can_check_reset_availability_for_workspace_accounts ... ok
+test chatwidget::tests::usage::usage_command_can_check_reset_availability_before_startup_refresh_finishes_snapshot ... ok
+test chatwidget::tests::usage::usage_menu_rate_limit_reset_entry_opens_reset_flow ... ok
+test chatwidget::tests::usage::usage_command_disables_reset_after_cached_zero_snapshot ... ok
+test chatwidget::tests::usage::usage_command_opens_menu_when_reset_is_available_snapshot ... ok
+test chatwidget::tests::usage::usage_menu_opens_analytics ... ok
+test chatwidget::tests::usage::usage_menu_refresh_enables_newly_available_reset ... ok
+test chatwidget::tests::usage::usage_menu_refresh_failure_preserves_disabled_known_zero ... ok
+test chatwidget::thread_usage::tests::combined_billing_surfaces_wait_for_credits_and_cost ... ok
+test chatwidget::thread_usage::tests::billing_surfaces_render_for_every_supported_enterprise_plan ... ok
+test chatwidget::thread_usage::tests::credits_only_settlement_completes_without_usd_estimates ... ok
+test chatwidget::thread_usage::tests::cost_settlement_waits_for_new_or_missing_usd_estimates ... ok
+test chatwidget::thread_usage::tests::estimated_cost_formats_dollars_and_sub_cent_values ... ok
+test chatwidget::thread_usage::tests::deselecting_billing_surfaces_cancels_polling_and_preserves_status_cache ... ok
+test chatwidget::thread_usage::tests::early_draw_rearms_thread_usage_retry_after_immediate_redraw ... ok
+test chatwidget::thread_usage::tests::early_draw_rearms_thread_usage_settlement_after_immediate_redraw ... ok
+test chatwidget::thread_usage::tests::replayed_errors_do_not_start_live_billing_refreshes ... ok
+test chatwidget::thread_usage::tests::status_history_survives_exhausted_billing_retries ... ok
+test chatwidget::thread_usage::tests::temporary_thread_usage_failures_have_bounded_retries ... ok
+test chatwidget::thread_usage::tests::transient_zero_cost_preserves_fresh_credits_and_breakdowns ... ok
+test chatwidget::thread_usage::tests::replayed_turn_completions_do_not_start_live_billing_refreshes ... ok
+test chatwidget::thread_usage::tests::transient_zero_credits_preserves_credits_only_estimates ... ok
+test chatwidget::usage_notice::tests::authoritative_reads_replace_windows_and_metadata ... ok
+test chatwidget::usage_notice::tests::most_constrained_window_wins_with_primary_tie_break ... ok
+test chatwidget::usage_notice::tests::notice_details_fit_without_truncating_the_warning ... ok
+test chatwidget::usage_notice::tests::notice_emphasis_tracks_utilization_without_claiming_a_hard_stop ... ok
+test chatwidget::thread_usage::tests::thread_usage_settlement_requires_request_started_after_turn_completion ... ok
+test chatwidget::thread_usage::tests::status_history_updates_again_after_billing_settles ... ok
+test chatwidget::usage_notice::tests::notice_shows_only_valid_future_reset_times ... ok
+test chatwidget::usage_notice::tests::notice_uses_existing_plan_and_window_thresholds ... ok
+test chatwidget::thread_usage::tests::unchanged_thread_usage_has_bounded_settlement_refreshes ... ok
+test chatwidget::usage_notice::tests::notice_redraws_when_only_limit_blockers_change ... ok
+test chatwidget::usage_notice::tests::sparse_updates_preserve_metadata_until_confirmed_recovery ... ok
+test chatwidget::usage_notice::tests::usable_credits_suppress_notices_and_survive_sparse_updates ... ok
+test goal_display::tests::goal_usage_summary_formats_time_and_budgeted_tokens ... ok
+test history_cell::warnings::tests::usage_warnings_render_in_both_transcripts_including_composites ... ok
+test local_chatgpt_auth::tests::preserves_usage_based_plan_type_wire_name ... ok
+test status::tests::status_card_token_usage_excludes_cached_tokens ... ok
+test chatwidget::usage_notice::tests::notice_follows_threads_and_clears_on_account_change ... ok
+test status::thread_usage::tests::thread_usage_breakdown_groups_aggregate_model_credit_percentages ... ok
+test status::thread_usage::tests::thread_usage_credit_formatting_rounds_to_one_decimal_place ... ok
+test status::thread_usage::tests::thread_usage_model_names_match_desktop_display_names ... ok
+test workspace_messages::tests::workspace_headline_from_response_reports_feature_disabled ... ok
+test workspace_messages::tests::workspace_headline_from_response_uses_first_non_empty_headline ... ok
+test status::tests::status_context_window_uses_last_usage ... ok
+test chatwidget::usage_notice::tests::rolling_updates_invalidate_only_reads_already_started ... ok
+test chatwidget::usage_notice::tests::overlapping_reads_keep_older_success_when_newer_read_fails ... ok
+test analytics::client::tests::analytics_uses_api_response_for_usage_and_turns_availability ... ok
+test analytics::tasks::tests::consumer_roots_include_paginated_archived_descendants_and_keep_missing_usage ... ok
+
+test result: ok. 164 passed; 0 failed; 0 ignored; 0 measured; 5567 filtered out; finished in 5.66s

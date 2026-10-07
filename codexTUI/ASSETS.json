@@ -1,0 +1,43 @@
+{
+  "large.png": {
+    "bytes": 56149,
+    "sha256": "82b3f4da49575d5c187990f982fd6ac9a156fcdd6ac26556f02a1764c487090e"
+  },
+  "compact.png": {
+    "bytes": 61004,
+    "sha256": "0d1733f1940877c299d3dea3265815594691671fe32601c32426eae82a1349f0"
+  },
+  "wrapped.png": {
+    "bytes": 44522,
+    "sha256": "f79cbd690cdac2c2a0814c1855b6a7729181ef454ca7d14428a9f21fc46257a3"
+  },
+  "codexTUI-preview.gif": {
+    "bytes": 8749402,
+    "sha256": "db6ba16ceb9c56c96fd480ed59899afe76caeec9d42bf923ecdd229674dfdc40"
+  },
+  "infobar-resize.gif": {
+    "bytes": 422878,
+    "sha256": "8cc1a10a0db0eb41555e67b23d9d98caeb57e292b77fa40be86af10a4b1d1e85"
+  },
+  "infobar-full.png": {
+    "bytes": 52235,
+    "sha256": "2fa80c9a914dbcb6eafd2c694c63d99ff6b2e4fa06d19d936f717d05703fec78"
+  },
+  "infobar-compact.png": {
+    "bytes": 31467,
+    "sha256": "76037e338405bb2f6652a6840ca0de406a17c5b08105a9c5a6f76e3eb7662320"
+  },
+  "infobar-wrapped.png": {
+    "bytes": 27975,
+    "sha256": "3695c6e43eae9dca6ccc8cb5c117e66a5e98ea90498c4951c1e8c800618484b1"
+  },
+  "top-infobar.patch": {
+    "bytes": 125169,
+    "sha256": "c3662a1e03675ca12c312095e17a99a62295e31263de5f67b92dce30cf9cd889"
+  },
+  "original_recording_retained_locally": {
+    "file": "codexTUI.gif",
+    "bytes": 103799105,
+    "excluded_from_git": true
+  }
+}

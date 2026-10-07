@@ -1,0 +1,3213 @@
+diff --git a/codex-rs/config/src/types.rs b/codex-rs/config/src/types.rs
+index 86d9134..9214567 100644
+--- a/codex-rs/config/src/types.rs
++++ b/codex-rs/config/src/types.rs
+@@ -895,6 +895,12 @@ pub struct Tui {
+     #[serde(default)]
+     pub status_line: Option<Vec<String>>,
+ 
++    /// Ordered top infobar item identifiers. Unset or empty hides the bar.
++    /// Use `/infobar` to select and reorder model, context, limits, reset times,
++    /// banked resets, and the fields available in `/statusline`.
++    #[serde(default)]
++    pub infobar: Option<Vec<String>>,
++
+     /// Color status line items with colors derived from the active syntax theme.
+     /// Defaults to `true`.
+     #[serde(default = "default_true")]
+diff --git a/codex-rs/config/src/types_tests.rs b/codex-rs/config/src/types_tests.rs
+index 5a9b3d8..dcb04d8 100644
+--- a/codex-rs/config/src/types_tests.rs
++++ b/codex-rs/config/src/types_tests.rs
+@@ -1,6 +1,24 @@
+ use super::*;
+ use pretty_assertions::assert_eq;
+ 
++#[test]
++fn infobar_configuration_preserves_order_and_explicit_disable() {
++    let settings: Tui =
++        toml::from_str("infobar = ['banked-resets', 'model', 'weekly-limit']").unwrap();
++    assert_eq!(
++        settings.infobar,
++        Some(vec![
++            "banked-resets".into(),
++            "model".into(),
++            "weekly-limit".into()
++        ])
++    );
++    let hidden: Tui = toml::from_str("infobar = []").unwrap();
++    assert_eq!(hidden.infobar, Some(vec![]));
++    let unset: Tui = toml::from_str("").unwrap();
++    assert_eq!(unset.infobar, None);
++}
++
+ #[test]
+ fn mouse_scroll_speed_accepts_integer_and_fractional_multipliers() {
+     for (value, expected) in [("1", 1.0), ("0.5", 0.5), ("3.0", 3.0)] {
+diff --git a/codex-rs/core/config.schema.json b/codex-rs/core/config.schema.json
+index a98e06f..e653022 100644
+--- a/codex-rs/core/config.schema.json
++++ b/codex-rs/core/config.schema.json
+@@ -4540,6 +4540,14 @@
+           "description": "Own the fullscreen transcript, including scrolling, selection, and search. Defaults to `true`; alternate-screen restrictions take precedence.",
+           "type": "boolean"
+         },
++        "infobar": {
++          "default": null,
++          "description": "Ordered top infobar item identifiers. Unset or empty hides the bar. Use `/infobar` to select and reorder model, context, limits, reset times, banked resets, and the fields available in `/statusline`.",
++          "items": {
++            "type": "string"
++          },
++          "type": "array"
++        },
+         "keymap": {
+           "allOf": [
+             {
+diff --git a/codex-rs/core/src/config/config_tests.rs b/codex-rs/core/src/config/config_tests.rs
+index d07c42f..be50a6b 100644
+--- a/codex-rs/core/src/config/config_tests.rs
++++ b/codex-rs/core/src/config/config_tests.rs
+@@ -1274,6 +1274,7 @@ fn config_toml_deserializes_model_availability_nux() {
+             right_click_paste: Default::default(),
+             alternate_screen: AltScreenMode::default(),
+             status_line: None,
++            infobar: None,
+             status_line_use_colors: true,
+             terminal_title: None,
+             theme: None,
+@@ -4416,6 +4417,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
+             right_click_paste: Default::default(),
+             alternate_screen: AltScreenMode::Auto,
+             status_line: None,
++            infobar: None,
+             status_line_use_colors: true,
+             terminal_title: None,
+             theme: None,
+diff --git a/codex-rs/core/src/config/mod.rs b/codex-rs/core/src/config/mod.rs
+index 704c949..3eb4c73 100644
+--- a/codex-rs/core/src/config/mod.rs
++++ b/codex-rs/core/src/config/mod.rs
+@@ -826,6 +826,9 @@ pub struct Config {
+     /// When unset, the TUI defaults to: `model-with-reasoning` and `current-dir`.
+     pub tui_status_line: Option<Vec<String>>,
+ 
++    /// Ordered item identifiers for the optional top infobar.
++    pub tui_infobar: Option<Vec<String>>,
++
+     /// Whether to color status line items with colors from the active syntax theme.
+     pub tui_status_line_use_colors: bool,
+ 
+@@ -4553,6 +4556,7 @@ impl Config {
+                 .map(|t| t.alternate_screen)
+                 .unwrap_or_default(),
+             tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
++            tui_infobar: cfg.tui.as_ref().and_then(|t| t.infobar.clone()),
+             tui_status_line_use_colors: cfg
+                 .tui
+                 .as_ref()
+diff --git a/codex-rs/tui/src/app/event_dispatch.rs b/codex-rs/tui/src/app/event_dispatch.rs
+index 5a18ad6..3594ce3 100644
+--- a/codex-rs/tui/src/app/event_dispatch.rs
++++ b/codex-rs/tui/src/app/event_dispatch.rs
+@@ -1802,6 +1802,9 @@ impl App {
+                     let rate_limit_reset_credits = response.rate_limit_reset_credits.clone();
+                     let snapshots = if accepted
+                     {
++                        self.chat_widget.set_infobar_reset_count(
++                            rate_limit_reset_credits.as_ref().map(|summary| summary.available_count),
++                        );
+                         self.chat_widget.apply_usage_notice_read(request_id);
+                         self.chat_widget.update_backend_banner(&response);
+                         self.apply_backend_banner_fallback(app_server).await;
+@@ -1913,6 +1916,7 @@ impl App {
+                     }
+                 }
+                 }
++                self.chat_widget.refresh_status_surfaces();
+                 if (accepted || matches!(
+                     origin,
+                     RateLimitRefreshOrigin::Recovery | RateLimitRefreshOrigin::ResetConsume { .. }
+@@ -3211,6 +3215,31 @@ impl App {
+                     tui.frame_requester().schedule_frame();
+                 }
+             }
++            AppEvent::InfobarSetup { items } => {
++                let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
++                let array = ids.iter().cloned().collect::<toml_edit::Array>();
++                let edit = crate::legacy_core::config::edit::ConfigEdit::SetPath {
++                    segments: vec!["tui".to_string(), "infobar".to_string()],
++                    value: toml_edit::Item::Value(array.into()),
++                };
++                match ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
++                    .with_edits([edit])
++                    .apply()
++                    .await
++                {
++                    Ok(()) => {
++                        self.local_settings.tui.infobar = Some(ids);
++                        self.chat_widget.setup_infobar(items);
++                    }
++                    Err(err) => {
++                        let error = format_config_error(&err);
++                        self.app_event_tx.send(AppEvent::FollowTranscript);
++                        self.chat_widget.add_error_message(format!(
++                            "Failed to save infobar settings: {error}"
++                        ));
++                    }
++                }
++            }
+             AppEvent::StatusLineSetupCancelled => {
+                 self.chat_widget.cancel_status_line_setup();
+             }
+diff --git a/codex-rs/tui/src/app/owned_transcript.rs b/codex-rs/tui/src/app/owned_transcript.rs
+index 3fcd0cd..50c69c8 100644
+--- a/codex-rs/tui/src/app/owned_transcript.rs
++++ b/codex-rs/tui/src/app/owned_transcript.rs
+@@ -148,6 +148,16 @@ impl App {
+         };
+         drop(bottom);
+         let available = screen_size.height.saturating_sub(bottom_height);
++        let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
++        let mut infobar_height = if dashboard_visible {
++            0
++        } else {
++            chat_widget
++                .infobar
++                .as_ref()
++                .map(|bar| bar.height(screen_size.width, transcript_bottom))
++                .unwrap_or_default()
++        };
+         let mut bottom_area = Rect::new(
+             /*x*/ 0,
+             screen_size.height.saturating_sub(bottom_height),
+@@ -158,7 +168,6 @@ impl App {
+         let mut footer_height_changed = false;
+         let mut feedback_tick = None;
+         let mut blossom_tick = None;
+-        let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
+         tui.draw(screen_size.height, |frame| {
+             ratatui::widgets::Clear.render(
+                 Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, available),
+@@ -167,9 +176,9 @@ impl App {
+             let mut completion_tip_area = view.render_with_turn_tip_space(
+                 Rect::new(
+                     /*x*/ 0,
+-                    /*y*/ 0,
++                    infobar_height,
+                     transcript_width,
+-                    transcript_bottom,
++                    transcript_bottom.saturating_sub(infobar_height),
+                 ),
+                 frame.buffer,
+                 &self.transcript_cells,
+@@ -223,12 +232,17 @@ impl App {
+                 // their separator. Resizing must not preserve a stale return control.
+                 ratatui::widgets::Clear.render(bottom_area, frame.buffer);
+                 transcript_bottom = bottom_area.y;
++                infobar_height = chat_widget
++                    .infobar
++                    .as_ref()
++                    .map(|bar| bar.height(screen_size.width, transcript_bottom))
++                    .unwrap_or_default();
+                 completion_tip_area = view.render_with_turn_tip_space(
+                     Rect::new(
+                         /*x*/ 0,
+-                        /*y*/ 0,
++                        infobar_height,
+                         transcript_width,
+-                        transcript_bottom,
++                        transcript_bottom.saturating_sub(infobar_height),
+                     ),
+                     frame.buffer,
+                     &self.transcript_cells,
+@@ -248,6 +262,14 @@ impl App {
+                     composer,
+                     MotionMode::from_animations_enabled(self.local_settings.tui.animations),
+                 );
++            if infobar_height > 0
++                && let Some(infobar) = &chat_widget.infobar
++            {
++                infobar.render(
++                    Rect::new(0, 0, screen_size.width, infobar_height),
++                    frame.buffer,
++                );
++            }
+             bottom.render(bottom_area, frame.buffer);
+             if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
+                 tip.render(area, frame.buffer);
+diff --git a/codex-rs/tui/src/app/owned_transcript_tests.rs b/codex-rs/tui/src/app/owned_transcript_tests.rs
+index ca6fd6e..6844563 100644
+--- a/codex-rs/tui/src/app/owned_transcript_tests.rs
++++ b/codex-rs/tui/src/app/owned_transcript_tests.rs
+@@ -33,6 +33,202 @@ pub(in crate::app) fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
+     })
+ }
+ 
++#[tokio::test]
++async fn infobar_stays_above_scrolled_transcript_and_yields_on_tiny_screens() -> Result<()> {
++    use crate::infobar::InfobarItem;
++    let mut app = crate::app::test_support::make_test_app().await;
++    attach_thread(&mut app, ThreadId::new());
++    app.chat_widget.set_infobar_reset_count(Some(3));
++    app.chat_widget
++        .setup_infobar(vec![InfobarItem::BankedResets]);
++    app.transcript_cells = vec![Arc::new(crate::history_cell::PlainHistoryCell::new(
++        (1..=40)
++            .map(|row| format!("Transcript row {row:02}").into())
++            .collect(),
++    ))];
++    let mut tui = crate::tui::test_support::make_test_tui()?;
++    tui.set_owned_screen(true)?;
++    let mut snapshots = Vec::new();
++    for (width, height) in [(80, 16), (40, 12), (12, 12), (40, 3), (80, 16)] {
++        let size = Size::new(width, height);
++        tui.terminal.resize(size)?;
++        tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
++        app.chat_widget
++            .apply_external_edit("preserved draft".into());
++        let bottom = app.render_owned_transcript(&mut tui, size)?;
++        if bottom.y > 1 {
++            assert!(
++                buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
++                    &tui.terminal
++                ))
++                .lines()
++                .next()
++                .unwrap()
++                .starts_with("Resets 3")
++            );
++            app.transcript_view.handle_key(
++                KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
++                &app.transcript_cells,
++            );
++            tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
++            app.render_owned_transcript(&mut tui, size)?;
++            let rendered = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
++                &tui.terminal,
++            ));
++            assert!(rendered.lines().next().unwrap().starts_with("Resets 3"));
++            snapshots.push(format!(
++                "{width}x{height}\n{}",
++                normalize_snapshot_paths(rendered)
++            ));
++        } else {
++            assert!(
++                !buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
++                    &tui.terminal
++                ))
++                .contains("Resets 3")
++            );
++        }
++        assert_eq!(
++            app.chat_widget.composer_text_with_pending(),
++            "preserved draft"
++        );
++    }
++    insta::assert_snapshot!("infobar_scrolling_and_resizing", snapshots.join("\n\n"));
++    tui.set_owned_screen(false)?;
++    Ok(())
++}
++
++#[tokio::test]
++async fn infobar_wraps_during_resize_without_moving_input_or_losing_account_values() -> Result<()> {
++    use crate::bottom_pane::StatusLineItem;
++    use crate::infobar::InfobarItem;
++    use crate::token_usage::TokenUsage;
++    use crate::token_usage::TokenUsageInfo;
++    let mut app = crate::app::test_support::make_test_app().await;
++    attach_thread(&mut app, ThreadId::new());
++    app.chat_widget.set_token_info(Some(TokenUsageInfo {
++        total_token_usage: TokenUsage {
++            total_tokens: 900_000,
++            ..Default::default()
++        },
++        last_token_usage: TokenUsage {
++            total_tokens: 100_000,
++            ..Default::default()
++        },
++        model_context_window: Some(256_000),
++    }));
++    app.chat_widget.set_infobar_reset_count(Some(3));
++    app.chat_widget
++        .on_rate_limit_snapshot(Some(codex_app_server_protocol::RateLimitSnapshot {
++            limit_id: None,
++            limit_name: None,
++            normal_model_slug: None,
++            primary: Some(codex_app_server_protocol::RateLimitWindow {
++                used_percent: 25,
++                window_duration_mins: Some(5 * 60),
++                resets_at: None,
++            }),
++            secondary: Some(codex_app_server_protocol::RateLimitWindow {
++                used_percent: 60,
++                window_duration_mins: Some(7 * 24 * 60),
++                resets_at: None,
++            }),
++            credits: None,
++            individual_limit: None,
++            plan_type: None,
++            spend_control_reached: None,
++            rate_limit_reached_type: None,
++        }));
++    app.chat_widget.setup_infobar(vec![
++        InfobarItem::Status(StatusLineItem::ModelWithReasoning),
++        InfobarItem::Status(StatusLineItem::ContextRemaining),
++        InfobarItem::Status(StatusLineItem::FiveHourLimit),
++        InfobarItem::Status(StatusLineItem::WeeklyLimit),
++        InfobarItem::BankedResets,
++    ]);
++    app.chat_widget.apply_external_edit("draft".into());
++    app.transcript_cells = vec![Arc::new(crate::history_cell::PlainHistoryCell::new(
++        (1..=40)
++            .map(|row| format!("Transcript row {row:02}").into())
++            .collect(),
++    ))];
++    let mut tui = crate::tui::test_support::make_test_tui()?;
++    tui.set_owned_screen(true)?;
++    let mut snapshots = Vec::new();
++    for (width, height) in [(160, 24), (80, 24), (40, 24), (20, 24), (40, 3), (160, 24)] {
++        let size = Size::new(width, height);
++        tui.terminal.resize(size)?;
++        tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
++        let bottom = app.render_owned_transcript(&mut tui, size)?;
++        let rendered = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
++            &tui.terminal,
++        ));
++        if height > 3 {
++            let bar_height = app
++                .chat_widget
++                .infobar
++                .as_ref()
++                .unwrap()
++                .desired_height(width);
++            assert!(bar_height + 1 < bottom.y);
++            let bar = rendered
++                .lines()
++                .take(usize::from(bar_height))
++                .collect::<Vec<_>>()
++                .join("\n");
++            for field in [
++                "gpt-test",
++                "100K/256K",
++                "64% left",
++                "75% left",
++                "40% left",
++                "Resets 3",
++            ] {
++                assert!(
++                    bar.contains(field),
++                    "{width} columns missing {field}: {bar}"
++                );
++            }
++            let cursor = tui.terminal.last_known_cursor_pos;
++            assert!(cursor.x < width && cursor.y >= bottom.y && cursor.y < bottom.bottom());
++            assert!(
++                rendered
++                    .lines()
++                    .nth(usize::from(cursor.y))
++                    .unwrap()
++                    .contains("draft")
++            );
++            app.transcript_view.handle_key(
++                KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE),
++                &app.transcript_cells,
++            );
++            tui.screen_size_for_event(&crate::tui::TuiEvent::Resize(size))?;
++            app.render_owned_transcript(&mut tui, size)?;
++            let scrolled = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
++                &tui.terminal,
++            ));
++            assert_eq!(
++                scrolled
++                    .lines()
++                    .take(usize::from(bar_height))
++                    .collect::<Vec<_>>()
++                    .join("\n"),
++                bar
++            );
++        } else {
++            assert!(!rendered.contains("100K/256K"));
++        }
++        assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
++        snapshots.push(format!(
++            "{width}x{height}\n{}",
++            normalize_snapshot_paths(rendered)
++        ));
++    }
++    insta::assert_snapshot!("responsive_infobar_transcript", snapshots.join("\n\n"));
++    tui.set_owned_screen(false)?;
++    Ok(())
++}
++
+ pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
+     app.chat_widget.handle_thread_session(ThreadSessionState {
+         daybreak_enabled: false,
+diff --git a/codex-rs/tui/src/app/snapshots/codex_tui__app__owned_transcript__tests__infobar_scrolling_and_resizing.snap b/codex-rs/tui/src/app/snapshots/codex_tui__app__owned_transcript__tests__infobar_scrolling_and_resizing.snap
+new file mode 100644
+index 0000000..a37fdcd
+--- /dev/null
++++ b/codex-rs/tui/src/app/snapshots/codex_tui__app__owned_transcript__tests__infobar_scrolling_and_resizing.snap
+@@ -0,0 +1,68 @@
++---
++source: tui/src/app/owned_transcript_tests.rs
++assertion_line: 94
++expression: "snapshots.join(\"\\n\\n\")"
++---
++80x16
++Resets 3
++Transcript row 24
++Transcript row 25
++Transcript row 26
++Transcript row 27
++Transcript row 28
++Transcript row 29
++Transcript row 30
++Transcript row 31
++Transcript row 32
++                             ↓ Back to bottom · esc
++
++› preserved draft
++
++  gpt-test default · /tmp/project
++  esc latest
++
++40x12
++Resets 3
++Transcript row 20
++Transcript row 21
++Transcript row 22
++Transcript row 23
++Transcript row 24
++         ↓ Back to bottom · esc
++
++› preserved draft
++
++  gpt-test default · /tmp/project
++  esc latest
++
++12x12
++Resets 3
++row 18
++Transcript
++row 19
++Transcript
++  ↓ Bottom
++
++› preserved
++  draft
++
++  gpt-test …
++  esc latest
++
++80x16
++Resets 3
++Transcript row 10
++Transcript row 11
++Transcript row 12
++Transcript row 13
++Transcript row 14
++Transcript row 15
++Transcript row 16
++Transcript row 17
++Transcript row 18
++                             ↓ Back to bottom · esc
++
++› preserved draft
++
++  gpt-test default · /tmp/project
++  esc latest
+diff --git a/codex-rs/tui/src/app/snapshots/codex_tui__app__owned_transcript__tests__responsive_infobar_transcript.snap b/codex-rs/tui/src/app/snapshots/codex_tui__app__owned_transcript__tests__responsive_infobar_transcript.snap
+new file mode 100644
+index 0000000..cbb30df
+--- /dev/null
++++ b/codex-rs/tui/src/app/snapshots/codex_tui__app__owned_transcript__tests__responsive_infobar_transcript.snap
+@@ -0,0 +1,139 @@
++---
++source: tui/src/app/owned_transcript_tests.rs
++assertion_line: 227
++expression: "snapshots.join(\"\\n\\n\")"
++---
++160x24
++gpt-test default · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
++Transcript row 24
++Transcript row 25
++Transcript row 26
++Transcript row 27
++Transcript row 28
++Transcript row 29
++Transcript row 30
++Transcript row 31
++Transcript row 32
++Transcript row 33
++Transcript row 34
++Transcript row 35
++Transcript row 36
++Transcript row 37
++Transcript row 38
++Transcript row 39
++Transcript row 40
++
++
++› draft
++
++  gpt-test default · /tmp/project
++
++
++80x24
++gpt-test default · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
++Resets 3
++Transcript row 08
++Transcript row 09
++Transcript row 10
++Transcript row 11
++Transcript row 12
++Transcript row 13
++Transcript row 14
++Transcript row 15
++Transcript row 16
++Transcript row 17
++Transcript row 18
++Transcript row 19
++Transcript row 20
++Transcript row 21
++Transcript row 22
++Transcript row 23
++                             ↓ Back to bottom · esc
++
++› draft
++
++  gpt-test default · /tmp/project
++  esc latest
++
++40x24
++gpt-test default
++Context 100K/256K 64% left · 5h 75% left
++weekly 40% left · Resets 3
++Transcript row 01
++Transcript row 02
++Transcript row 03
++Transcript row 04
++Transcript row 05
++Transcript row 06
++Transcript row 07
++Transcript row 08
++Transcript row 09
++Transcript row 10
++Transcript row 11
++Transcript row 12
++Transcript row 13
++Transcript row 14
++Transcript row 15
++         ↓ Back to bottom · esc
++
++› draft
++
++  gpt-test default · /tmp/project
++  esc latest
++
++20x24
++gpt-test default
++100K/256K 64% left
++5h 75% left
++weekly 40% left
++Resets 3
++Transcript row 01
++Transcript row 02
++Transcript row 03
++Transcript row 04
++Transcript row 05
++Transcript row 06
++Transcript row 07
++Transcript row 08
++Transcript row 09
++Transcript row 10
++Transcript row 11
++Transcript row 12
++Transcript row 13
++  ↓ Back to bottom
++
++› draft
++
++  gpt-test default …
++  esc latest
++
++40x3
++
++› draft
++
++
++160x24
++gpt-test default · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
++Transcript row 01
++Transcript row 02
++Transcript row 03
++Transcript row 04
++Transcript row 05
++Transcript row 06
++Transcript row 07
++Transcript row 08
++Transcript row 09
++Transcript row 10
++Transcript row 11
++Transcript row 12
++Transcript row 13
++Transcript row 14
++Transcript row 15
++Transcript row 16
++Transcript row 17
++                                                                     ↓ Back to bottom · esc
++
++› draft
++
++  gpt-test default · /tmp/project
++  esc latest
+diff --git a/codex-rs/tui/src/app/tests/local_command_scroll_tests.rs b/codex-rs/tui/src/app/tests/local_command_scroll_tests.rs
+index 45ee9e7..5612335 100644
+--- a/codex-rs/tui/src/app/tests/local_command_scroll_tests.rs
++++ b/codex-rs/tui/src/app/tests/local_command_scroll_tests.rs
+@@ -47,6 +47,35 @@ fn submit_local_command(app: &mut App, command: &str) {
+     assert_eq!(app.chat_widget.composer_text_with_pending(), "");
+ }
+ 
++#[tokio::test]
++async fn infobar_save_persists_order_and_hide_selection() -> Result<()> {
++    use crate::infobar::InfobarItem;
++    let (mut app, _, _) = make_test_app_with_channels().await;
++    let mut tui = crate::tui::test_support::make_test_tui()?;
++    let mut server = start_config_write_test_app_server(&app).await?;
++    for items in [
++        vec![
++            InfobarItem::BankedResets,
++            InfobarItem::Status(crate::bottom_pane::StatusLineItem::ModelName),
++        ],
++        vec![],
++    ] {
++        let expected = items.iter().map(ToString::to_string).collect::<Vec<_>>();
++        app.handle_event(&mut tui, &mut server, AppEvent::InfobarSetup { items })
++            .await?;
++        assert_eq!(app.local_settings.tui.infobar, Some(expected.clone()));
++        let saved: toml::Value = toml::from_str(&std::fs::read_to_string(
++            app.local_settings.user_config_path.as_path(),
++        )?)?;
++        assert_eq!(
++            saved["tui"]["infobar"],
++            toml::Value::Array(expected.into_iter().map(toml::Value::String).collect())
++        );
++    }
++    server.shutdown().await?;
++    Ok(())
++}
++
+ #[tokio::test]
+ async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -> Result<()> {
+     let (mut app, mut events, _op_rx) = make_test_app_with_channels().await;
+@@ -68,6 +97,7 @@ async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -
+         ("/memories", KeyCode::Esc),
+         ("/title", KeyCode::Esc),
+         ("/statusline", KeyCode::Esc),
++        ("/infobar", KeyCode::Esc),
+     ] {
+         while events.try_recv().is_ok() {}
+         submit_local_command(&mut app, command);
+@@ -135,6 +165,7 @@ async fn settings_picker_save_failures_reveal_their_errors() -> Result<()> {
+             items: vec![],
+             use_theme_colors: false,
+         },
++        AppEvent::InfobarSetup { items: vec![] },
+         AppEvent::TerminalTitleSetup { items: vec![] },
+         AppEvent::PersistModelSelection {
+             model: "gpt-5.5".into(),
+diff --git a/codex-rs/tui/src/app/tests/rate_limits.rs b/codex-rs/tui/src/app/tests/rate_limits.rs
+index 460b977..03aec5a 100644
+--- a/codex-rs/tui/src/app/tests/rate_limits.rs
++++ b/codex-rs/tui/src/app/tests/rate_limits.rs
+@@ -53,6 +53,115 @@ fn account_rate_limits_response(snapshot: RateLimitSnapshot) -> GetAccountRateLi
+     }
+ }
+ 
++#[tokio::test]
++async fn infobar_periodic_refresh_updates_resets_and_ignores_old_responses() -> Result<()> {
++    use crate::infobar::InfobarItem;
++    let (mut app, _, _) = make_test_app_with_channels().await;
++    app.chat_widget
++        .setup_infobar(vec![InfobarItem::BankedResets]);
++    let mut tui = crate::tui::test_support::make_test_tui()?;
++    let mut server =
++        crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
++    let origin = RateLimitRefreshOrigin::Periodic;
++    let mut first_request = None;
++    for count in [3, 0] {
++        let (request_id, generation) = app
++            .rate_limit_refresh_state
++            .start(origin, &mut app.rate_limit_hard_stop_generation)
++            .unwrap();
++        first_request.get_or_insert((request_id, generation));
++        let mut response = account_rate_limits_response(rate_limit_snapshot(20, None, None));
++        response
++            .rate_limit_reset_credits
++            .as_mut()
++            .unwrap()
++            .available_count = count;
++        app.handle_event(
++            &mut tui,
++            &mut server,
++            AppEvent::RateLimitsLoaded {
++                request_id,
++                origin,
++                hard_stop_generation: generation,
++                result: Ok(response),
++            },
++        )
++        .await?;
++        assert_eq!(
++            app.chat_widget
++                .infobar
++                .as_ref()
++                .map(|bar| bar.full_line().to_string()),
++            Some(format!("Resets {count}"))
++        );
++    }
++    let (request_id, generation) = first_request.unwrap();
++    let mut stale = account_rate_limits_response(rate_limit_snapshot(20, None, None));
++    stale
++        .rate_limit_reset_credits
++        .as_mut()
++        .unwrap()
++        .available_count = 99;
++    app.handle_event(
++        &mut tui,
++        &mut server,
++        AppEvent::RateLimitsLoaded {
++            request_id,
++            origin,
++            hard_stop_generation: generation,
++            result: Ok(stale),
++        },
++    )
++    .await?;
++    assert_eq!(
++        app.chat_widget
++            .infobar
++            .as_ref()
++            .map(|bar| bar.full_line().to_string()),
++        Some("Resets 0".into())
++    );
++    let mut missing = account_rate_limits_response(rate_limit_snapshot(100, None, None));
++    missing.rate_limit_reset_credits = None;
++    for (result, expected) in [
++        (
++            Err("transient read error".into()),
++            Some("Resets 0".to_string()),
++        ),
++        (Ok(missing), None),
++        (
++            Ok(account_rate_limits_response(rate_limit_snapshot(
++                0, None, None,
++            ))),
++            Some("Resets 0".to_string()),
++        ),
++    ] {
++        let (request_id, generation) = app
++            .rate_limit_refresh_state
++            .start(origin, &mut app.rate_limit_hard_stop_generation)
++            .unwrap();
++        app.handle_event(
++            &mut tui,
++            &mut server,
++            AppEvent::RateLimitsLoaded {
++                request_id,
++                origin,
++                hard_stop_generation: generation,
++                result,
++            },
++        )
++        .await?;
++        assert_eq!(
++            app.chat_widget
++                .infobar
++                .as_ref()
++                .map(|bar| bar.full_line().to_string()),
++            expected
++        );
++    }
++    server.shutdown().await?;
++    Ok(())
++}
++
+ async fn deliver_rolling_rate_limit_snapshot(
+     app: &mut App,
+     app_server: &AppServerSession,
+diff --git a/codex-rs/tui/src/app_event.rs b/codex-rs/tui/src/app_event.rs
+index 910d203..698d0ed 100644
+--- a/codex-rs/tui/src/app_event.rs
++++ b/codex-rs/tui/src/app_event.rs
+@@ -1584,6 +1584,11 @@ pub(crate) enum AppEvent {
+     /// Dismiss the status-line setup UI without changing config.
+     StatusLineSetupCancelled,
+ 
++    /// Apply a user-confirmed top infobar selection and ordering.
++    InfobarSetup {
++        items: Vec<crate::infobar::InfobarItem>,
++    },
++
+     /// Apply a user-confirmed terminal-title item ordering/selection.
+     TerminalTitleSetup {
+         items: Vec<TerminalTitleItem>,
+diff --git a/codex-rs/tui/src/chatwidget.rs b/codex-rs/tui/src/chatwidget.rs
+index 4af61b2..72e4cd2 100644
+--- a/codex-rs/tui/src/chatwidget.rs
++++ b/codex-rs/tui/src/chatwidget.rs
+@@ -383,6 +383,7 @@ mod windows_sandbox_prompts;
+ use self::status_state::StatusIndicatorState;
+ use self::status_state::StatusState;
+ use self::status_state::TerminalTitleStatusKind;
++mod infobar;
+ mod status_controls;
+ mod status_surfaces;
+ mod streaming;
+@@ -719,6 +720,8 @@ pub(crate) struct ChatWidget {
+     session_network_proxy: Option<SessionNetworkProxyRuntime>,
+     // Shared latch so we only warn once about invalid status-line item IDs.
+     status_line_invalid_items_warned: Arc<AtomicBool>,
++    pub(crate) infobar: Option<crate::infobar::Infobar>,
++    infobar_invalid_items_warned: bool,
+     // Shared latch so we only warn once about invalid terminal-title item IDs.
+     terminal_title_invalid_items_warned: Arc<AtomicBool>,
+     // Last terminal title emitted, to avoid writing duplicate OSC updates.
+diff --git a/codex-rs/tui/src/chatwidget/constructor.rs b/codex-rs/tui/src/chatwidget/constructor.rs
+index a7e19f0..e895fd1 100644
+--- a/codex-rs/tui/src/chatwidget/constructor.rs
++++ b/codex-rs/tui/src/chatwidget/constructor.rs
+@@ -258,6 +258,8 @@ impl ChatWidget {
+             instruction_source_paths: Vec::new(),
+             session_network_proxy: None,
+             status_line_invalid_items_warned,
++            infobar: None,
++            infobar_invalid_items_warned: false,
+             terminal_title_invalid_items_warned,
+             last_terminal_title: None,
+             last_terminal_title_requires_action: false,
+diff --git a/codex-rs/tui/src/chatwidget/infobar.rs b/codex-rs/tui/src/chatwidget/infobar.rs
+new file mode 100644
+index 0000000..df84c3c
+--- /dev/null
++++ b/codex-rs/tui/src/chatwidget/infobar.rs
+@@ -0,0 +1,365 @@
++//! Infobar state derived from the same runtime values as the footer and `/usage`.
++
++use super::*;
++use crate::infobar::DEFAULT_INFOBAR_ITEMS;
++use crate::infobar::Infobar;
++use crate::infobar::InfobarItem;
++use crate::infobar::InfobarSetupView;
++use crate::infobar::InfobarValue;
++
++impl ChatWidget {
++    pub(super) fn infobar_items_with_invalids(&self) -> (Vec<InfobarItem>, Vec<String>) {
++        super::status_surfaces::parse_items_with_invalids(
++            self.local_settings.tui.infobar.clone().unwrap_or_default(),
++        )
++    }
++
++    pub(super) fn open_infobar_setup(&mut self) {
++        let selected = self.local_settings.tui.infobar.clone().unwrap_or_else(|| {
++            DEFAULT_INFOBAR_ITEMS
++                .iter()
++                .map(ToString::to_string)
++                .collect()
++        });
++        let preview = InfobarItem::iter()
++            .filter_map(|item| {
++                self.infobar_value(item)
++                    .map(|value| (item, value.full_text()))
++            })
++            .collect();
++        self.bottom_pane.show_view(Box::new(InfobarSetupView::new(
++            &selected,
++            preview,
++            self.app_event_tx.clone(),
++            self.bottom_pane.list_keymap(),
++        )));
++    }
++
++    pub(crate) fn setup_infobar(&mut self, items: Vec<InfobarItem>) {
++        self.local_settings.tui.infobar = Some(items.iter().map(ToString::to_string).collect());
++        self.refresh_status_surfaces();
++        self.request_redraw();
++    }
++
++    pub(crate) fn set_infobar_reset_count(&mut self, count: Option<i64>) {
++        self.available_rate_limit_reset_credits = count;
++    }
++
++    pub(super) fn refresh_infobar(&mut self, items: &[InfobarItem], invalids: &[String]) {
++        if self.thread_id.is_some() && !invalids.is_empty() && !self.infobar_invalid_items_warned {
++            self.infobar_invalid_items_warned = true;
++            self.on_warning(format!(
++                "Ignored invalid infobar items: {}.",
++                proper_join(invalids)
++            ));
++        }
++        let segments = items
++            .iter()
++            .filter_map(|item| self.infobar_value(*item).map(|value| (*item, value)))
++            .collect::<Vec<_>>();
++        self.infobar = Infobar::new(segments, self.thread_id);
++    }
++
++    pub(super) fn infobar_value(&mut self, item: InfobarItem) -> Option<InfobarValue> {
++        match item {
++            InfobarItem::BankedResets => self
++                .available_rate_limit_reset_credits
++                .filter(|count| *count >= 0)
++                .map(|count| InfobarValue::Text(format!("Resets {count}"))),
++            InfobarItem::PrimaryReset | InfobarItem::SecondaryReset => {
++                let secondary = item == InfobarItem::SecondaryReset;
++                let display = self.rate_limit_snapshots_by_limit_id.get("codex")?;
++                let window = if secondary {
++                    display.secondary.as_ref()
++                } else {
++                    display.primary.as_ref()
++                }?;
++                let label = limit_label_for_window(window.window_minutes, secondary);
++                window
++                    .resets_at
++                    .as_ref()
++                    .map(|time| InfobarValue::Text(format!("{label} resets {time}")))
++            }
++            InfobarItem::Status(StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit) => {
++                let secondary = item == InfobarItem::Status(StatusLineItem::WeeklyLimit);
++                let display = self.rate_limit_snapshots_by_limit_id.get("codex")?;
++                let (window, is_secondary) = if secondary {
++                    super::status_surfaces::weekly_status_window(display)
++                } else {
++                    super::status_surfaces::five_hour_status_window(display)
++                }?;
++                let label = limit_label_for_window(window.window_minutes, is_secondary);
++                Some(InfobarValue::Meter {
++                    label,
++                    percent: 100.0 - window.used_percent,
++                    suffix: "left",
++                    tokens: None,
++                })
++            }
++            InfobarItem::Status(StatusLineItem::ContextRemaining | StatusLineItem::ContextUsed) => {
++                let used = item == InfobarItem::Status(StatusLineItem::ContextUsed);
++                // The footer has optimistic startup fallbacks. A measured
++                // meter must have both usage and capacity, including real zero.
++                if self.token_usage_pending {
++                    return Some(InfobarValue::Text("Context pending".into()));
++                }
++                let (Some(info), Some(window)) =
++                    (&self.token_info, self.status_line_context_window_size())
++                else {
++                    return Some(InfobarValue::Text("Context unknown".into()));
++                };
++                let count = info.last_token_usage.tokens_in_context_window();
++                if window <= 0 || count < 0 {
++                    return Some(InfobarValue::Text("Context unavailable".into()));
++                }
++                let remaining = info
++                    .last_token_usage
++                    .percent_of_context_window_remaining(window);
++                let percent = if used { 100 - remaining } else { remaining };
++                let tokens = Some(format!(
++                    "{}/{}",
++                    format_tokens_compact(count),
++                    format_tokens_compact(window)
++                ));
++                Some(InfobarValue::Meter {
++                    label: "Context".into(),
++                    percent: percent as f64,
++                    suffix: if used { "used" } else { "left" },
++                    tokens,
++                })
++            }
++            InfobarItem::Status(item) => self
++                .status_line_value_for_item(item)
++                .map(InfobarValue::Text),
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
++    use codex_app_server_protocol::RateLimitWindow;
++    use pretty_assertions::assert_eq;
++
++    fn text(chat: &ChatWidget) -> Option<String> {
++        chat.infobar.as_ref().map(|bar| bar.full_line().to_string())
++    }
++
++    #[tokio::test]
++    async fn infobar_omits_unknowns_preserves_order_and_updates_reset_count() {
++        let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
++        assert!(chat.infobar.is_none());
++        chat.setup_infobar(vec![
++            InfobarItem::BankedResets,
++            InfobarItem::Status(StatusLineItem::CodexVersion),
++        ]);
++        assert_eq!(text(&chat), Some(CODEX_CLI_VERSION.into()));
++        chat.set_infobar_reset_count(Some(3));
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some(format!("Resets 3 · {CODEX_CLI_VERSION}")));
++        chat.set_infobar_reset_count(Some(0));
++        chat.refresh_status_surfaces();
++        assert!(text(&chat).unwrap().starts_with("Resets 0 · "));
++        chat.set_infobar_reset_count(None);
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some(CODEX_CLI_VERSION.into()));
++        chat.set_infobar_reset_count(Some(-1));
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some(CODEX_CLI_VERSION.into()));
++        chat.setup_infobar(vec![]);
++        assert!(chat.infobar.is_none());
++    }
++
++    #[tokio::test]
++    async fn infobar_meters_follow_window_duration_and_reset_times() {
++        let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
++        chat.setup_infobar(vec![
++            InfobarItem::Status(StatusLineItem::FiveHourLimit),
++            InfobarItem::Status(StatusLineItem::WeeklyLimit),
++            InfobarItem::PrimaryReset,
++        ]);
++        chat.on_rate_limit_snapshot(Some(RateLimitSnapshot {
++            limit_id: None,
++            limit_name: None,
++            normal_model_slug: None,
++            primary: Some(RateLimitWindow {
++                used_percent: 25,
++                window_duration_mins: Some(24 * 60),
++                resets_at: Some(2_000_000_000),
++            }),
++            secondary: Some(RateLimitWindow {
++                used_percent: 60,
++                window_duration_mins: Some(7 * 24 * 60),
++                resets_at: None,
++            }),
++            credits: None,
++            individual_limit: None,
++            plan_type: None,
++            spend_control_reached: None,
++            rate_limit_reached_type: None,
++        }));
++        let line = text(&chat).unwrap();
++        assert!(
++            line.starts_with(
++                "daily [████████░░] 75% left · weekly [████░░░░░░] 40% left · daily resets "
++            ),
++            "{line}"
++        );
++        assert!(chat.infobar_value(InfobarItem::SecondaryReset).is_none());
++    }
++
++    #[tokio::test]
++    async fn infobar_context_count_tracks_active_context_and_preserves_percent() {
++        let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
++        chat.setup_infobar(vec![InfobarItem::Status(StatusLineItem::ContextRemaining)]);
++        chat.token_info = Some(TokenUsageInfo {
++            total_token_usage: TokenUsage {
++                total_tokens: 900_000,
++                ..Default::default()
++            },
++            last_token_usage: TokenUsage {
++                total_tokens: 100_000,
++                ..Default::default()
++            },
++            model_context_window: Some(256_000),
++        });
++        chat.refresh_status_surfaces();
++        assert_eq!(
++            text(&chat),
++            Some("Context 100K/256K [██████░░░░] 64% left".into())
++        );
++        chat.setup_infobar(vec![InfobarItem::Status(StatusLineItem::ContextUsed)]);
++        assert_eq!(
++            text(&chat),
++            Some("Context 100K/256K [████░░░░░░] 36% used".into())
++        );
++        // Compaction replaces the active-context count, not the session total.
++        chat.token_info
++            .as_mut()
++            .unwrap()
++            .last_token_usage
++            .total_tokens = 100;
++        chat.refresh_status_surfaces();
++        assert_eq!(
++            text(&chat),
++            Some("Context 100/256K [░░░░░░░░░░] 0% used".into())
++        );
++        chat.setup_infobar(vec![InfobarItem::Status(StatusLineItem::ContextRemaining)]);
++        chat.token_info
++            .as_mut()
++            .unwrap()
++            .last_token_usage
++            .total_tokens = 300_000;
++        chat.refresh_status_surfaces();
++        assert_eq!(
++            text(&chat),
++            Some("Context 300K/256K [░░░░░░░░░░] 0% left".into())
++        );
++        chat.token_usage_pending = true;
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some("Context pending".into()));
++    }
++
++    #[tokio::test]
++    async fn infobar_context_count_does_not_invent_unknown_capacity() {
++        let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
++        chat.config.model_context_window = None;
++        chat.setup_infobar(vec![InfobarItem::Status(StatusLineItem::ContextRemaining)]);
++        assert_eq!(text(&chat), Some("Context unknown".into()));
++        chat.config.model_context_window = Some(1_000_000);
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some("Context unknown".into()));
++        chat.set_token_info(Some(TokenUsageInfo {
++            total_token_usage: TokenUsage::default(),
++            last_token_usage: TokenUsage::default(),
++            model_context_window: None,
++        }));
++        chat.refresh_status_surfaces();
++        assert_eq!(
++            text(&chat),
++            Some("Context 0/1M [██████████] 100% left".into())
++        );
++        chat.config.model_context_window = Some(0);
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some("Context unavailable".into()));
++        chat.config.model_context_window = Some(256_000);
++        chat.token_info
++            .as_mut()
++            .unwrap()
++            .last_token_usage
++            .total_tokens = -1;
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some("Context unavailable".into()));
++    }
++
++    #[tokio::test]
++    async fn infobar_account_change_and_explicit_clear_invalidate_quota_and_reset_data() {
++        let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
++        chat.setup_infobar(vec![
++            InfobarItem::BankedResets,
++            InfobarItem::Status(StatusLineItem::FiveHourLimit),
++        ]);
++        chat.set_infobar_reset_count(Some(3));
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some("Resets 3".into()));
++        chat.on_rate_limit_snapshot(None);
++        assert!(text(&chat).is_none());
++        chat.set_infobar_reset_count(Some(0));
++        chat.refresh_status_surfaces();
++        assert_eq!(text(&chat), Some("Resets 0".into()));
++        chat.update_account_state(None, None, false, false);
++        assert!(text(&chat).is_none());
++    }
++
++    #[tokio::test]
++    async fn infobar_workspace_headline_refresh_uses_shared_cache_and_interval() {
++        let (mut chat, _, mut events, _) = make_chatwidget_manual_with_sender().await;
++        chat.local_settings.tui.status_line = Some(vec![]);
++        chat.has_codex_backend_auth = true;
++        chat.setup_infobar(vec![InfobarItem::Status(StatusLineItem::WorkspaceHeadline)]);
++        let request = |events: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>| {
++            std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| match event {
++                AppEvent::RefreshStatusLineWorkspaceHeadline { request_id } => Some(request_id),
++                _ => None,
++            })
++        };
++        let first = request(&mut events).unwrap();
++        assert!(chat.set_status_line_workspace_headline(
++            first,
++            Ok(
++                crate::workspace_messages::WorkspaceHeadlineFetchResult::Available(Some(
++                    "Workspace notice".into()
++                ))
++            )
++        ));
++        assert_eq!(text(&chat), Some("Workspace notice".into()));
++        chat.refresh_status_line_if_workspace_headline_due();
++        assert!(request(&mut events).is_none());
++        chat.status_line_workspace_headline_last_requested_at =
++            Some(Instant::now() - crate::workspace_messages::WORKSPACE_HEADLINE_REFRESH_INTERVAL);
++        chat.refresh_status_line_if_workspace_headline_due();
++        let second = request(&mut events).unwrap();
++        assert!(chat.set_status_line_workspace_headline(second, Err("transient error".into())));
++        assert_eq!(text(&chat), Some("Workspace notice".into()));
++        assert!(!chat.set_status_line_workspace_headline(
++            first,
++            Ok(crate::workspace_messages::WorkspaceHeadlineFetchResult::FeatureDisabled)
++        ));
++        chat.update_account_state(None, None, false, false);
++        assert!(text(&chat).is_none());
++    }
++
++    #[tokio::test]
++    async fn infobar_sanitizes_multiline_fields_and_ignores_unknown_ids() {
++        let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
++        chat.local_settings.tui.infobar = Some(vec!["unknown".into(), "workspace-headline".into()]);
++        chat.status_line_workspace_headline = Some("First\nSecond\tThird".into());
++        // Keep this unit test focused on rendering; shared-state refresh would
++        // schedule the normal workspace lookup first.
++        let (items, invalids) = chat.infobar_items_with_invalids();
++        chat.refresh_infobar(&items, &invalids);
++        assert_eq!(text(&chat), Some("First Second Third".into()));
++        assert_eq!(invalids, vec!["\"unknown\"".to_string()]);
++    }
++}
+diff --git a/codex-rs/tui/src/chatwidget/input_flow.rs b/codex-rs/tui/src/chatwidget/input_flow.rs
+index 6ee018e..f78b1f8 100644
+--- a/codex-rs/tui/src/chatwidget/input_flow.rs
++++ b/codex-rs/tui/src/chatwidget/input_flow.rs
+@@ -32,6 +32,7 @@ impl ChatWidget {
+                 | SlashCommand::Memories
+                 | SlashCommand::Title
+                 | SlashCommand::Statusline
++                | SlashCommand::Infobar
+                 | SlashCommand::Theme,
+             ) => false,
+             InputResult::Command(_)
+diff --git a/codex-rs/tui/src/chatwidget/rate_limits.rs b/codex-rs/tui/src/chatwidget/rate_limits.rs
+index 6475ead..b390547 100644
+--- a/codex-rs/tui/src/chatwidget/rate_limits.rs
++++ b/codex-rs/tui/src/chatwidget/rate_limits.rs
+@@ -396,6 +396,7 @@ impl ChatWidget {
+             }
+         } else {
+             self.rate_limit_snapshots_by_limit_id.clear();
++            self.available_rate_limit_reset_credits = None;
+             self.codex_rate_limit_reached_type = None;
+             self.codex_spend_control_reached = None;
+         }
+diff --git a/codex-rs/tui/src/chatwidget/rendering.rs b/codex-rs/tui/src/chatwidget/rendering.rs
+index adfe1ce..d9c4e27 100644
+--- a/codex-rs/tui/src/chatwidget/rendering.rs
++++ b/codex-rs/tui/src/chatwidget/rendering.rs
+@@ -183,6 +183,10 @@ impl ChatWidget {
+             None => RenderableItem::Owned(Box::new(())),
+         };
+         let mut flex = FlexRenderable::new();
++        if let Some(infobar) = &self.infobar {
++            // The fixed composer gets space first on short inline viewports.
++            flex.push(1, RenderableItem::Borrowed(infobar));
++        }
+         flex.push(/*flex*/ 1, active_cell_renderable);
+         for cell in self
+             .realtime_conversation
+diff --git a/codex-rs/tui/src/chatwidget/rendering_tests.rs b/codex-rs/tui/src/chatwidget/rendering_tests.rs
+index 6a95ec4..bdc5ddb 100644
+--- a/codex-rs/tui/src/chatwidget/rendering_tests.rs
++++ b/codex-rs/tui/src/chatwidget/rendering_tests.rs
+@@ -63,6 +63,60 @@ fn render_frame(widget: &ChatWidget, width: u16) -> Buffer {
+     buffer
+ }
+ 
++#[tokio::test]
++async fn inline_infobar_wraps_and_yields_to_the_composer_on_short_viewports() {
++    use crate::infobar::InfobarItem;
++    let (mut widget, _, _) = widget_with_counting_cell(50, 50, true).await;
++    widget.set_token_info(Some(TokenUsageInfo {
++        total_token_usage: TokenUsage {
++            total_tokens: 900_000,
++            ..Default::default()
++        },
++        last_token_usage: TokenUsage {
++            total_tokens: 100_000,
++            ..Default::default()
++        },
++        model_context_window: Some(256_000),
++    }));
++    widget.set_infobar_reset_count(Some(3));
++    widget.setup_infobar(vec![
++        InfobarItem::Status(StatusLineItem::ContextRemaining),
++        InfobarItem::BankedResets,
++    ]);
++    widget.apply_external_edit("draft".into());
++    for width in [80, 40, 20, 80] {
++        let area = Rect::new(0, 0, width, 24);
++        let mut buf = Buffer::empty(area);
++        widget.render(area, &mut buf);
++        let bar_height = widget.infobar.as_ref().unwrap().desired_height(width);
++        let bar = (0..bar_height)
++            .map(|y| (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>())
++            .collect::<Vec<_>>()
++            .join("\n");
++        assert!(
++            bar.contains("100K/256K") && bar.contains("64% left") && bar.contains("Resets 3"),
++            "{bar}"
++        );
++        let (x, y) = widget.cursor_pos(area).expect("visible composer cursor");
++        assert!(x < width && y >= bar_height && y < area.height);
++
++        let short_height = widget
++            .bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default())
++            .desired_height(width)
++            + 1;
++        let short_area = Rect::new(0, 0, width, short_height);
++        let mut with_bar = Buffer::empty(short_area);
++        widget.render(short_area, &mut with_bar);
++        let cursor = widget.cursor_pos(short_area);
++        let bar = widget.infobar.take();
++        let mut without_bar = Buffer::empty(short_area);
++        widget.render(short_area, &mut without_bar);
++        assert_eq!(with_bar, without_bar);
++        assert_eq!(cursor, widget.cursor_pos(short_area));
++        widget.infobar = bar;
++    }
++}
++
+ fn contains_text(buffer: &Buffer, text: &str) -> bool {
+     buffer
+         .content
+@@ -75,6 +129,144 @@ fn contains_text(buffer: &Buffer, text: &str) -> bool {
+         })
+ }
+ 
++#[tokio::test]
++async fn infobar_resize_during_streaming_preserves_prompt_entry_and_footer() {
++    use crate::infobar::InfobarItem;
++    use codex_app_server_protocol::RateLimitWindow;
++    let (mut widget, _, mut events, mut operations) = make_chatwidget_manual_with_sender().await;
++    widget.thread_id = Some(ThreadId::new());
++    widget.set_token_info(Some(TokenUsageInfo {
++        total_token_usage: TokenUsage::default(),
++        last_token_usage: TokenUsage {
++            total_tokens: 100_000,
++            ..Default::default()
++        },
++        model_context_window: Some(256_000),
++    }));
++    widget.on_rate_limit_snapshot(Some(RateLimitSnapshot {
++        limit_id: None,
++        limit_name: None,
++        normal_model_slug: None,
++        primary: Some(RateLimitWindow {
++            used_percent: 25,
++            window_duration_mins: Some(5 * 60),
++            resets_at: None,
++        }),
++        secondary: Some(RateLimitWindow {
++            used_percent: 60,
++            window_duration_mins: Some(7 * 24 * 60),
++            resets_at: None,
++        }),
++        credits: None,
++        individual_limit: None,
++        plan_type: None,
++        spend_control_reached: None,
++        rate_limit_reached_type: None,
++    }));
++    widget.setup_infobar(vec![
++        InfobarItem::Status(StatusLineItem::ModelWithReasoning),
++        InfobarItem::Status(StatusLineItem::ContextRemaining),
++        InfobarItem::Status(StatusLineItem::FiveHourLimit),
++        InfobarItem::Status(StatusLineItem::WeeklyLimit),
++        InfobarItem::BankedResets,
++    ]);
++    widget.set_infobar_reset_count(Some(0));
++    widget.refresh_status_surfaces();
++    widget.on_task_started();
++    let mut draft = String::new();
++    let mut committed_output = String::new();
++    for (step, width) in [
++        160, 110, 107, 106, 102, 101, 97, 96, 90, 40, 20, 40, 90, 96, 97, 101, 102, 106, 107, 110,
++        160,
++    ]
++    .into_iter()
++    .enumerate()
++    {
++        widget.on_agent_message_delta(format!("Stream line {step}\n"));
++        widget.on_commit_tick();
++        let ch = char::from(b'a' + step as u8);
++        widget.handle_key_event(crossterm::event::KeyCode::Char(ch).into());
++        // A non-text key flushes the composer's normal paste-burst buffer.
++        widget.handle_key_event(crossterm::event::KeyCode::End.into());
++        draft.push(ch);
++        assert!(widget.has_active_agent_stream());
++        assert_eq!(widget.composer_text_with_pending(), draft);
++        let area = Rect::new(0, 0, width, 24);
++        let mut buffer = Buffer::empty(area);
++        widget.render(area, &mut buffer);
++        let (x, y) = widget
++            .cursor_pos(area)
++            .expect("visible prompt while streaming");
++        assert!(x < width && y < area.height);
++        assert!(contains_text(&buffer, &draft));
++        let bar_height = widget.infobar.as_ref().unwrap().desired_height(width);
++        let header = buffer
++            .content
++            .chunks(usize::from(width))
++            .take(usize::from(bar_height))
++            .map(|row| {
++                row.iter()
++                    .map(ratatui::buffer::Cell::symbol)
++                    .collect::<String>()
++            })
++            .collect::<Vec<_>>()
++            .join("\n");
++        assert!(
++            header.contains("100K/256K") && header.contains("64% left"),
++            "{header}"
++        );
++        assert!(
++            header.contains("75% left") && header.contains("40% left"),
++            "{header}"
++        );
++        // The top strip does not replace or modify the native bottom surface.
++        let bottom =
++            widget.bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default());
++        let bottom_area = Rect::new(0, 0, width, bottom.desired_height(width));
++        let mut with_bar = Buffer::empty(bottom_area);
++        bottom.render(bottom_area, &mut with_bar);
++        drop(bottom);
++        let saved_bar = widget.infobar.take();
++        let mut without_bar = Buffer::empty(bottom_area);
++        widget
++            .bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default())
++            .render(bottom_area, &mut without_bar);
++        assert_eq!(with_bar, without_bar);
++        widget.infobar = saved_bar;
++        while let Ok(event) = events.try_recv() {
++            if let AppEvent::InsertHistoryCell(cell) = event {
++                committed_output.push_str(
++                    &cell
++                        .display_lines(width)
++                        .iter()
++                        .map(ToString::to_string)
++                        .collect::<Vec<_>>()
++                        .join("\n"),
++                );
++            }
++        }
++    }
++    widget.finalize_completed_assistant_message(None);
++    while let Ok(event) = events.try_recv() {
++        if let AppEvent::InsertHistoryCell(cell) = event {
++            committed_output.push_str(
++                &cell
++                    .display_lines(160)
++                    .iter()
++                    .map(ToString::to_string)
++                    .collect::<Vec<_>>()
++                    .join("\n"),
++            );
++        }
++    }
++    assert!(committed_output.contains("Stream line"));
++    assert_eq!(widget.composer_text_with_pending(), draft);
++    assert!(
++        operations.try_recv().is_err(),
++        "resizing and typing must not submit the draft"
++    );
++}
++
+ #[tokio::test]
+ async fn owned_bottom_pane_preserves_draft_cursor_and_read_only_notice() {
+     let (mut widget, _sender, _events, _operations) = make_chatwidget_manual_with_sender().await;
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+index 9a39bfa..866d4fc 100644
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -577,6 +577,9 @@ impl ChatWidget {
+             SlashCommand::Statusline => {
+                 self.open_status_line_setup();
+             }
++            SlashCommand::Infobar => {
++                self.open_infobar_setup();
++            }
+             SlashCommand::Theme => {
+                 self.open_theme_picker();
+             }
+@@ -1325,6 +1328,7 @@ impl ChatWidget {
+             | SlashCommand::Hooks
+             | SlashCommand::Title
+             | SlashCommand::Statusline
++            | SlashCommand::Infobar
+             | SlashCommand::Theme
+             | SlashCommand::Tui
+             | SlashCommand::Pets => QueueDrain::Stop,
+diff --git a/codex-rs/tui/src/chatwidget/status_surfaces.rs b/codex-rs/tui/src/chatwidget/status_surfaces.rs
+index 46727cf..4aa4b64 100644
+--- a/codex-rs/tui/src/chatwidget/status_surfaces.rs
++++ b/codex-rs/tui/src/chatwidget/status_surfaces.rs
+@@ -1,4 +1,4 @@
+-//! Status-line and terminal-title rendering helpers for `ChatWidget`.
++//! Footer, infobar, and terminal-title rendering helpers for `ChatWidget`.
+ //!
+ //! Keeping this logic in a focused submodule makes the additive title/status
+ //! behavior easier to review without paging through the rest of `chatwidget.rs`.
+@@ -45,40 +45,52 @@ const TERMINAL_TITLE_ACTION_REQUIRED_PREFIX_HIDDEN: &str = "[ . ] Action Require
+ #[derive(Debug)]
+ /// Parsed status-surface configuration for one refresh pass.
+ ///
+-/// The status line and terminal title share some expensive or stateful inputs
++/// The footer, infobar, and terminal title share some expensive or stateful inputs
+ /// (notably git branch lookup and invalid-item warnings). This snapshot lets one
+-/// refresh pass compute those shared concerns once, then render both surfaces
++/// refresh pass compute those shared concerns once, then render all surfaces
+ /// from the same selection set.
+ struct StatusSurfaceSelections {
+     status_line_items: Vec<StatusLineItem>,
++    infobar_items: Vec<crate::infobar::InfobarItem>,
++    invalid_infobar_items: Vec<String>,
+     invalid_status_line_items: Vec<String>,
+     terminal_title_items: Vec<TerminalTitleItem>,
+     invalid_terminal_title_items: Vec<String>,
+ }
+ 
+ impl StatusSurfaceSelections {
++    fn shared_status_items(&self) -> impl Iterator<Item = StatusLineItem> + '_ {
++        self.status_line_items.iter().copied().chain(
++            self.infobar_items
++                .iter()
++                .filter_map(|item| item.status_item()),
++        )
++    }
++
+     fn uses_git_branch(&self) -> bool {
+-        self.status_line_items.contains(&StatusLineItem::GitBranch)
++        self.shared_status_items()
++            .any(|item| item == StatusLineItem::GitBranch)
+             || self
+                 .terminal_title_items
+                 .contains(&TerminalTitleItem::GitBranch)
+     }
+ 
+     fn uses_git_summary(&self) -> bool {
+-        self.status_line_items
+-            .contains(&StatusLineItem::PullRequestNumber)
+-            || self
+-                .status_line_items
+-                .contains(&StatusLineItem::BranchChanges)
++        self.shared_status_items().any(|item| {
++            matches!(
++                item,
++                StatusLineItem::PullRequestNumber | StatusLineItem::BranchChanges
++            )
++        })
+     }
+ 
+     fn uses_workspace_headline(&self) -> bool {
+-        self.status_line_items
+-            .contains(&StatusLineItem::WorkspaceHeadline)
++        self.shared_status_items()
++            .any(|item| item == StatusLineItem::WorkspaceHeadline)
+     }
+ 
+     fn uses_thread_usage(&self) -> bool {
+-        self.status_line_items.iter().any(|item| {
++        self.shared_status_items().any(|item| {
+             matches!(
+                 item,
+                 StatusLineItem::ThreadCredits | StatusLineItem::EstimatedThreadCost
+@@ -108,7 +120,10 @@ impl ChatWidget {
+         let (status_line_items, invalid_status_line_items) = self.status_line_items_with_invalids();
+         let (terminal_title_items, invalid_terminal_title_items) =
+             self.terminal_title_items_with_invalids();
++        let (infobar_items, invalid_infobar_items) = self.infobar_items_with_invalids();
+         StatusSurfaceSelections {
++            infobar_items,
++            invalid_infobar_items,
+             status_line_items,
+             invalid_status_line_items,
+             terminal_title_items,
+@@ -292,10 +307,10 @@ impl ChatWidget {
+         }
+     }
+ 
+-    /// Recomputes both status surfaces from one shared config snapshot.
++    /// Recomputes all status surfaces from one shared config snapshot.
+     ///
+-    /// This is the common refresh entrypoint for the footer status line and the
+-    /// terminal title. It parses both configurations once, emits invalid-item
++    /// This is the common refresh entrypoint for the footer, infobar, and
++    /// terminal title. It parses their configurations once, emits invalid-item
+     /// warnings once, synchronizes shared cached state (such as git-branch
+     /// lookup), then renders each surface from that shared snapshot.
+     pub(crate) fn refresh_status_surfaces(&mut self) {
+@@ -306,6 +321,7 @@ impl ChatWidget {
+         self.warn_invalid_terminal_title_items_once(&selections.invalid_terminal_title_items);
+         self.sync_status_surface_shared_state(&selections);
+         self.refresh_status_line_from_selections(&selections);
++        self.refresh_infobar(&selections.infobar_items, &selections.invalid_infobar_items);
+         self.refresh_terminal_title_from_selections(&selections);
+     }
+ 
+@@ -401,7 +417,7 @@ impl ChatWidget {
+         if self.local_settings.tui.animations
+             && self.local_settings.tui.effects.progress
+             && self.status_state.thread_title_generation_pending
+-            && (selections.status_line_items.iter().any(|item| {
++            && (selections.shared_status_items().any(|item| {
+                 matches!(
+                     item,
+                     StatusLineItem::ThreadName
+@@ -659,10 +675,7 @@ impl ChatWidget {
+     pub(super) fn refresh_status_line_if_workspace_headline_due(&mut self) {
+         let now = Instant::now();
+         if self.status_line_workspace_headline_should_fetch(now)
+-            && self
+-                .status_line_items_with_invalids()
+-                .0
+-                .contains(&StatusLineItem::WorkspaceHeadline)
++            && self.status_surface_selections().uses_workspace_headline()
+         {
+             self.refresh_status_line();
+         }
+@@ -692,10 +705,7 @@ impl ChatWidget {
+         }
+ 
+         if !self.status_line_workspace_messages_disabled
+-            && self
+-                .status_line_items_with_invalids()
+-                .0
+-                .contains(&StatusLineItem::WorkspaceHeadline)
++            && self.status_surface_selections().uses_workspace_headline()
+         {
+             self.frame_requester
+                 .schedule_frame_in(crate::workspace_messages::WORKSPACE_HEADLINE_REFRESH_INTERVAL);
+@@ -1116,7 +1126,7 @@ impl ChatWidget {
+     }
+ }
+ 
+-fn five_hour_status_window(
++pub(super) fn five_hour_status_window(
+     snapshot: &RateLimitSnapshotDisplay,
+ ) -> Option<(&RateLimitWindowDisplay, bool)> {
+     find_primary_codex_window(snapshot, "5h")
+@@ -1125,7 +1135,7 @@ fn five_hour_status_window(
+         .or_else(|| non_weekly_secondary_window_when_primary_is_weekly(snapshot))
+ }
+ 
+-fn weekly_status_window(
++pub(super) fn weekly_status_window(
+     snapshot: &RateLimitSnapshotDisplay,
+ ) -> Option<(&RateLimitWindowDisplay, bool)> {
+     find_codex_window(snapshot, "weekly")
+@@ -1255,7 +1265,9 @@ fn approval_mode_display(config: &Config) -> String {
+     config.permissions.approval_policy.value().to_string()
+ }
+ 
+-fn parse_items_with_invalids<T>(ids: impl IntoIterator<Item = String>) -> (Vec<T>, Vec<String>)
++pub(super) fn parse_items_with_invalids<T>(
++    ids: impl IntoIterator<Item = String>,
++) -> (Vec<T>, Vec<String>)
+ where
+     T: std::str::FromStr,
+ {
+diff --git a/codex-rs/tui/src/infobar.rs b/codex-rs/tui/src/infobar.rs
+new file mode 100644
+index 0000000..4e378e4
+--- /dev/null
++++ b/codex-rs/tui/src/infobar.rs
+@@ -0,0 +1,1206 @@
++//! Optional top status bar and its local `/infobar` configuration picker.
++//!
++//! Ordinary fields reuse the footer's identifiers and live values. Reset fields
++//! read the account state already used by `/usage`; displaying them never spends
++//! a reset or starts a separate polling loop.
++
++use std::cell::Ref;
++use std::cell::RefCell;
++use std::collections::BTreeMap;
++use std::collections::BTreeSet;
++use std::fmt;
++use std::str::FromStr;
++
++use codex_protocol::ThreadId;
++use crossterm::event::KeyEvent;
++use ratatui::buffer::Buffer;
++use ratatui::layout::Rect;
++use ratatui::text::Line;
++use ratatui::text::Span;
++use ratatui::widgets::Clear;
++use ratatui::widgets::Widget;
++use strum::IntoEnumIterator;
++
++use crate::app_event::AppEvent;
++use crate::app_event_sender::AppEventSender;
++use crate::bottom_pane::BottomPaneView;
++use crate::bottom_pane::CancellationEvent;
++use crate::bottom_pane::MultiSelectItem;
++use crate::bottom_pane::MultiSelectPicker;
++use crate::bottom_pane::StatusLineItem;
++use crate::bottom_pane::status_line_from_segments;
++use crate::keymap::ListKeymap;
++use crate::line_truncation::line_width;
++use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
++use crate::render::renderable::Renderable;
++use crate::style::secondary_text_style;
++
++pub(crate) const DEFAULT_INFOBAR_ITEMS: [&str; 5] = [
++    "model-with-reasoning",
++    "context-remaining",
++    "five-hour-limit",
++    "weekly-limit",
++    "banked-resets",
++];
++
++#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
++pub(crate) enum InfobarItem {
++    Status(StatusLineItem),
++    BankedResets,
++    PrimaryReset,
++    SecondaryReset,
++}
++
++impl fmt::Display for InfobarItem {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            Self::Status(item) => item.fmt(f),
++            Self::BankedResets => f.write_str("banked-resets"),
++            Self::PrimaryReset => f.write_str("primary-reset"),
++            Self::SecondaryReset => f.write_str("secondary-reset"),
++        }
++    }
++}
++
++impl FromStr for InfobarItem {
++    type Err = strum::ParseError;
++
++    fn from_str(id: &str) -> Result<Self, Self::Err> {
++        match id {
++            "banked-resets" => Ok(Self::BankedResets),
++            "primary-reset" => Ok(Self::PrimaryReset),
++            "secondary-reset" => Ok(Self::SecondaryReset),
++            _ => id.parse().map(Self::Status),
++        }
++    }
++}
++
++impl InfobarItem {
++    pub(crate) fn iter() -> impl Iterator<Item = Self> {
++        StatusLineItem::iter().map(Self::Status).chain([
++            Self::BankedResets,
++            Self::PrimaryReset,
++            Self::SecondaryReset,
++        ])
++    }
++
++    pub(crate) fn status_item(self) -> Option<StatusLineItem> {
++        match self {
++            Self::Status(item) => Some(item),
++            _ => None,
++        }
++    }
++
++    pub(crate) fn accent_item(self) -> StatusLineItem {
++        self.status_item().unwrap_or(StatusLineItem::WeeklyLimit)
++    }
++
++    fn description(self) -> &'static str {
++        match self {
++            Self::Status(item) => item.description(),
++            Self::BankedResets => "Available banked usage resets (omitted when unknown)",
++            Self::PrimaryReset => "Primary usage limit reset time (omitted when unknown)",
++            Self::SecondaryReset => "Secondary usage limit reset time (omitted when unknown)",
++        }
++    }
++}
++
++pub(crate) enum InfobarValue {
++    Text(String),
++    Meter {
++        label: String,
++        percent: f64,
++        suffix: &'static str,
++        tokens: Option<String>,
++    },
++}
++
++#[derive(Clone, Copy)]
++enum InfobarLabel {
++    Full,
++    Short,
++    Hidden,
++}
++
++impl InfobarValue {
++    fn text(&self, cells: usize, label_detail: InfobarLabel) -> String {
++        let text = match self {
++            Self::Text(text) => text.clone(),
++            Self::Meter {
++                label,
++                percent,
++                suffix,
++                tokens,
++            } => {
++                if !percent.is_finite() {
++                    return Self::sanitize(format!("{label} unavailable"));
++                }
++                let percent = percent.clamp(0.0, 100.0).round() as usize;
++                let filled = (percent * cells + 50) / 100;
++                let meter = if cells > 0 {
++                    format!("[{}{}]", "█".repeat(filled), "░".repeat(cells - filled))
++                } else {
++                    String::new()
++                };
++                let label = if tokens.is_some() {
++                    match label_detail {
++                        InfobarLabel::Full => label.as_str(),
++                        InfobarLabel::Short => "Ctx",
++                        InfobarLabel::Hidden => "",
++                    }
++                } else {
++                    label
++                };
++                let mut parts = Vec::new();
++                if !label.is_empty() {
++                    parts.push(label.to_string());
++                }
++                if let Some(tokens) = tokens {
++                    parts.push(tokens.clone());
++                }
++                if !meter.is_empty() {
++                    parts.push(meter);
++                }
++                parts.push(format!("{percent}% {suffix}"));
++                parts.join(" ")
++            }
++        };
++        Self::sanitize(text)
++    }
++
++    fn sanitize(text: String) -> String {
++        text.chars()
++            .map(|ch| if ch.is_control() { ' ' } else { ch })
++            .collect()
++    }
++
++    pub(crate) fn full_text(&self) -> String {
++        self.text(10, InfobarLabel::Full)
++    }
++
++    fn narrow_texts(&self) -> Vec<String> {
++        if let Self::Text(text) = self {
++            let mut texts = vec![self.full_text()];
++            if let Some(state) = text.strip_prefix("Context ") {
++                texts.push(Self::sanitize(format!("Ctx {state}")));
++            }
++            return texts;
++        }
++        let Self::Meter {
++            label,
++            percent,
++            suffix,
++            tokens,
++        } = self
++        else {
++            return vec![self.full_text()];
++        };
++        let labels = if tokens.is_some() {
++            &[
++                InfobarLabel::Full,
++                InfobarLabel::Short,
++                InfobarLabel::Hidden,
++            ][..]
++        } else {
++            &[InfobarLabel::Full][..]
++        };
++        let mut texts = labels
++            .iter()
++            .map(|label| self.text(0, *label))
++            .collect::<Vec<_>>();
++        if tokens.is_some() {
++            // Raw counts are secondary to a complete labeled percentage in a
++            // terminal too narrow to show both. Never cut through a numeral.
++            for label in [label.as_str(), "Ctx"] {
++                texts.push(
++                    Self::Meter {
++                        label: label.into(),
++                        percent: *percent,
++                        suffix,
++                        tokens: None,
++                    }
++                    .full_text_without_meter(),
++                );
++            }
++        }
++        if label == "weekly" {
++            texts.push(
++                Self::Meter {
++                    label: "wk".into(),
++                    percent: *percent,
++                    suffix,
++                    tokens: None,
++                }
++                .full_text_without_meter(),
++            );
++        }
++        texts
++    }
++
++    fn full_text_without_meter(&self) -> String {
++        self.text(0, InfobarLabel::Full)
++    }
++}
++
++struct InfobarField {
++    item: InfobarItem,
++    compact: Line<'static>,
++    compact_width: usize,
++    meters: Vec<Line<'static>>,
++    narrow: Vec<Line<'static>>,
++}
++
++#[derive(Default)]
++struct InfobarLayoutCache {
++    width: Option<u16>,
++    full: Vec<Line<'static>>,
++    constrained_rows: u16,
++    constrained: Vec<Line<'static>>,
++}
++
++/// Styled field variants are cached with runtime values; layout uses terminal cells.
++pub(crate) struct Infobar {
++    fields: Vec<InfobarField>,
++    separator: Span<'static>,
++    compact_width: usize,
++    meter_fields: Vec<usize>,
++    layout: RefCell<InfobarLayoutCache>,
++}
++
++fn infobar_colors_enabled() -> bool {
++    supports_color::on_cached(supports_color::Stream::Stdout).is_some()
++}
++
++impl Infobar {
++    // Bound custom selections so they cannot occupy the entire live viewport.
++    const MAX_ROWS: u16 = 5;
++    const MIN_METER_CELLS: usize = 2;
++    const MAX_METER_CELLS: usize = 10;
++
++    pub(crate) fn new(
++        fields: impl IntoIterator<Item = (InfobarItem, InfobarValue)>,
++        thread_id: Option<ThreadId>,
++    ) -> Option<Self> {
++        Self::new_with_colors(fields, thread_id, infobar_colors_enabled())
++    }
++
++    fn new_with_colors(
++        fields: impl IntoIterator<Item = (InfobarItem, InfobarValue)>,
++        thread_id: Option<ThreadId>,
++        use_colors: bool,
++    ) -> Option<Self> {
++        let fields: Vec<_> = fields
++            .into_iter()
++            .filter(|(_, value)| match value {
++                InfobarValue::Meter { percent, .. } => percent.is_finite(),
++                InfobarValue::Text(text) => !InfobarValue::sanitize(text.clone()).trim().is_empty(),
++            })
++            .map(|(item, value)| {
++                let full = status_line_from_segments(
++                    [(item.accent_item(), value.full_text())],
++                    use_colors,
++                    thread_id,
++                )
++                .unwrap_or_default();
++                let mut style = full
++                    .spans
++                    .first()
++                    .map(|span| span.style)
++                    .unwrap_or_default();
++                if !use_colors {
++                    style.fg = None;
++                    style.bg = None;
++                }
++                let styled = |text| Line::from(Span::styled(text, style));
++                let compact = styled(value.text(0, InfobarLabel::Full));
++                let compact_width = line_width(&compact);
++                InfobarField {
++                    item,
++                    compact,
++                    compact_width,
++                    meters: if matches!(value, InfobarValue::Meter { .. }) {
++                        (Self::MIN_METER_CELLS..=Self::MAX_METER_CELLS)
++                            .rev()
++                            .map(|cells| styled(value.text(cells, InfobarLabel::Full)))
++                            .collect()
++                    } else {
++                        Vec::new()
++                    },
++                    narrow: value.narrow_texts().into_iter().map(styled).collect(),
++                }
++            })
++            .collect();
++        let separator = if use_colors {
++            Span::styled(" · ", secondary_text_style())
++        } else {
++            Span::raw(" · ")
++        };
++        let compact_width = fields
++            .iter()
++            .map(|field| field.compact_width)
++            .sum::<usize>()
++            + fields.len().saturating_sub(1) * crate::width::display_width(&separator.content);
++        let mut meter_fields = fields
++            .iter()
++            .enumerate()
++            .filter_map(|(index, field)| (!field.meters.is_empty()).then_some(index))
++            .collect::<Vec<_>>();
++        // Keep context's visual meter longest, then quotas in configured order.
++        // This changes decoration only: every field stays in its selected position.
++        meter_fields.sort_by_key(|index| {
++            !matches!(
++                fields[*index].item,
++                InfobarItem::Status(StatusLineItem::ContextRemaining | StatusLineItem::ContextUsed)
++            )
++        });
++        (!fields.is_empty()).then_some(Self {
++            fields,
++            separator,
++            compact_width,
++            meter_fields,
++            layout: RefCell::default(),
++        })
++    }
++
++    #[cfg(test)]
++    pub(crate) fn full_line(&self) -> Line<'static> {
++        self.join(
++            self.fields
++                .iter()
++                .map(|field| field.meters.first().unwrap_or(&field.compact).clone()),
++        )
++    }
++
++    fn join(&self, fields: impl IntoIterator<Item = Line<'static>>) -> Line<'static> {
++        let mut spans = Vec::new();
++        for field in fields {
++            if !spans.is_empty() {
++                spans.push(self.separator.clone());
++            }
++            spans.extend(field.spans);
++        }
++        Line::from(spans)
++    }
++
++    fn lines(&self, width: u16, max_rows: u16) -> Ref<'_, [Line<'static>]> {
++        let max_rows = max_rows.min(Self::MAX_ROWS);
++        if self.layout.borrow().width != Some(width) {
++            let full = self.layout_lines(width, Self::MAX_ROWS);
++            self.layout.replace(InfobarLayoutCache {
++                width: Some(width),
++                full,
++                ..Default::default()
++            });
++        }
++        let needs_constrained = {
++            let cache = self.layout.borrow();
++            cache.full.len() > usize::from(max_rows) && cache.constrained_rows != max_rows
++        };
++        if needs_constrained {
++            let lines = self.layout_lines(width, max_rows);
++            let mut cache = self.layout.borrow_mut();
++            cache.constrained_rows = max_rows;
++            cache.constrained = lines;
++        }
++        Ref::map(self.layout.borrow(), |cache| {
++            if cache.full.len() <= usize::from(max_rows) {
++                cache.full.as_slice()
++            } else {
++                cache.constrained.as_slice()
++            }
++        })
++    }
++
++    fn layout_lines(&self, width: u16, max_rows: u16) -> Vec<Line<'static>> {
++        if width == 0 || max_rows == 0 {
++            return Vec::new();
++        }
++        let width = usize::from(width);
++        let max_rows = usize::from(max_rows.min(Self::MAX_ROWS));
++        if self.compact_width <= width {
++            let budget = width - self.compact_width;
++            let minimum_cost = Self::MIN_METER_CELLS + crate::width::display_width(" []");
++            let visible = self.meter_fields.len().min(budget / minimum_cost);
++            let mut details = vec![None; self.fields.len()];
++            if visible > 0 {
++                // Grow one cell at a time once every meter fits. Below that
++                // boundary, remove minimum-size meters individually without
++                // growing the others as the terminal shrinks.
++                let extra = if visible == self.meter_fields.len() {
++                    budget - visible * minimum_cost
++                } else {
++                    0
++                };
++                let growth = (extra / visible).min(Self::MAX_METER_CELLS - Self::MIN_METER_CELLS);
++                for (position, index) in self.meter_fields.iter().take(visible).enumerate() {
++                    let cells =
++                        (Self::MIN_METER_CELLS + growth + usize::from(position < extra % visible))
++                            .min(Self::MAX_METER_CELLS);
++                    details[*index] = Some(Self::MAX_METER_CELLS - cells);
++                }
++            }
++            return vec![
++                self.join(self.fields.iter().enumerate().map(|(index, field)| {
++                    details[index]
++                        .map(|detail| &field.meters[detail])
++                        .unwrap_or(&field.compact)
++                        .clone()
++                })),
++            ];
++        }
++        let mut selected = (0..self.fields.len()).collect::<Vec<_>>();
++        let mut rows = self.pack_fields(width, &selected);
++        while rows.len() > max_rows && selected.len() > 1 {
++            // Only severe constraints remove fields. Retained fields keep their
++            // configured order; context and quota values outlive metadata.
++            let Some(remove) = selected
++                .iter()
++                .enumerate()
++                .max_by_key(|(position, index)| {
++                    let priority = match self.fields[**index].item {
++                        InfobarItem::Status(
++                            StatusLineItem::ContextRemaining | StatusLineItem::ContextUsed,
++                        ) => 0,
++                        InfobarItem::Status(
++                            StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit,
++                        ) => 1,
++                        InfobarItem::BankedResets
++                        | InfobarItem::PrimaryReset
++                        | InfobarItem::SecondaryReset => 2,
++                        _ => 3,
++                    };
++                    (priority, *position)
++                })
++                .map(|(position, _)| position)
++            else {
++                break;
++            };
++            selected.remove(remove);
++            rows = self.pack_fields(width, &selected);
++        }
++        let hidden = self.fields.len() - selected.len();
++        let mut lines = rows
++            .into_iter()
++            .map(|row| self.join(row))
++            .collect::<Vec<_>>();
++        if hidden > 0
++            && let Some(last) = lines.last_mut()
++        {
++            for marker in [
++                format!(" · +{hidden} more"),
++                format!(" +{hidden}"),
++                " …".into(),
++            ] {
++                if line_width(last) + crate::width::display_width(&marker) <= width {
++                    last.spans.push(Span::raw(marker));
++                    break;
++                }
++            }
++        }
++        lines
++    }
++
++    fn pack_fields(&self, width: usize, selected: &[usize]) -> Vec<Vec<Line<'static>>> {
++        let mut rows = vec![Vec::new()];
++        let mut used = 0;
++        for index in selected {
++            let field = &self.fields[*index];
++            let line =
++                if let Some(line) = field.narrow.iter().find(|line| line_width(line) <= width) {
++                    line.clone()
++                } else if matches!(
++                    field.item,
++                    InfobarItem::Status(
++                        StatusLineItem::ContextRemaining
++                            | StatusLineItem::ContextUsed
++                            | StatusLineItem::FiveHourLimit
++                            | StatusLineItem::WeeklyLimit
++                    ) | InfobarItem::BankedResets
++                        | InfobarItem::PrimaryReset
++                        | InfobarItem::SecondaryReset
++                ) {
++                    // A complete metric cannot fit; a visible marker is safer than
++                    // a truncated number or a missing left/used qualifier.
++                    Line::from("…")
++                } else {
++                    truncate_line_with_ellipsis_if_overflow(field.compact.clone(), width)
++                };
++            let field_width = line_width(&line);
++            if used > 0 && used + 3 + field_width > width {
++                rows.push(Vec::new());
++                used = 0;
++            }
++            if used > 0 {
++                used += 3;
++            }
++            used += field_width;
++            if let Some(row) = rows.last_mut() {
++                row.push(line);
++            }
++        }
++        rows
++    }
++
++    /// Leave at least one transcript row in addition to the reserved composer.
++    pub(crate) fn height(&self, width: u16, available_height: u16) -> u16 {
++        self.desired_height(width)
++            .min(available_height.saturating_sub(1))
++    }
++}
++
++impl Renderable for Infobar {
++    fn desired_height(&self, width: u16) -> u16 {
++        self.lines(width, Self::MAX_ROWS).len() as u16
++    }
++
++    fn render(&self, area: Rect, buf: &mut Buffer) {
++        Clear.render(area, buf);
++        for (offset, line) in self.lines(area.width, area.height).iter().enumerate() {
++            Widget::render(
++                line,
++                Rect::new(area.x, area.y + offset as u16, area.width, 1),
++                buf,
++            );
++        }
++    }
++}
++
++pub(crate) struct InfobarSetupView {
++    picker: MultiSelectPicker,
++}
++
++impl InfobarSetupView {
++    pub(crate) fn new(
++        selected: &[String],
++        preview: BTreeMap<InfobarItem, String>,
++        app_event_tx: AppEventSender,
++        list_keymap: ListKeymap,
++    ) -> Self {
++        let mut seen = BTreeSet::new();
++        let mut items = Vec::new();
++        for item in selected
++            .iter()
++            .filter_map(|id| id.parse::<InfobarItem>().ok())
++        {
++            if seen.insert(item) {
++                items.push(Self::select_item(item, true));
++            }
++        }
++        for item in InfobarItem::iter() {
++            if !seen.contains(&item) {
++                items.push(Self::select_item(item, false));
++            }
++        }
++        Self {
++            picker: MultiSelectPicker::builder(
++                "Configure Infobar".to_string(),
++                Some(
++                    "Select and order top bar items. Clear all items to hide the bar.".to_string(),
++                ),
++                app_event_tx,
++            )
++            .list_keymap(list_keymap)
++            .items(items)
++            .enable_ordering()
++            .on_preview(move |items| {
++                status_line_from_segments(
++                    items.iter().filter(|item| item.enabled).filter_map(|item| {
++                        let item = item.id.parse::<InfobarItem>().ok()?;
++                        preview
++                            .get(&item)
++                            .map(|text| (item.accent_item(), text.clone()))
++                    }),
++                    infobar_colors_enabled(),
++                    None,
++                )
++            })
++            .on_confirm(|ids, tx| {
++                tx.send(AppEvent::InfobarSetup {
++                    items: ids.iter().filter_map(|id| id.parse().ok()).collect(),
++                });
++            })
++            .build(),
++        }
++    }
++
++    fn select_item(item: InfobarItem, enabled: bool) -> MultiSelectItem {
++        MultiSelectItem {
++            id: item.to_string(),
++            name: item.to_string(),
++            description: Some(item.description().to_string()),
++            enabled,
++            orderable: true,
++            section_break_after: false,
++        }
++    }
++}
++
++impl BottomPaneView for InfobarSetupView {
++    fn keymap_contexts(&self) -> crate::keymap::KeymapContextSet {
++        crate::keymap::KeymapContextSet::new(crate::keymap::KeymapContext::List)
++    }
++
++    fn handle_key_event(&mut self, key_event: KeyEvent) {
++        self.picker.handle_key_event(key_event);
++    }
++
++    fn is_complete(&self) -> bool {
++        self.picker.complete
++    }
++
++    fn on_ctrl_c(&mut self) -> CancellationEvent {
++        self.picker.close();
++        CancellationEvent::Handled
++    }
++}
++
++impl Renderable for InfobarSetupView {
++    fn render(&self, area: Rect, buf: &mut Buffer) {
++        self.picker.render(area, buf);
++    }
++
++    fn desired_height(&self, width: u16) -> u16 {
++        self.picker.desired_height(width)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::keymap::RuntimeKeymap;
++    use crossterm::event::KeyCode;
++    use pretty_assertions::assert_eq;
++    use tokio::sync::mpsc::unbounded_channel;
++
++    #[test]
++    fn infobar_picker_reorders_and_confirms_without_spending_resets() {
++        let (tx, mut rx) = unbounded_channel();
++        let mut view = InfobarSetupView::new(
++            &["model".into(), "banked-resets".into()],
++            BTreeMap::new(),
++            AppEventSender::new(tx),
++            RuntimeKeymap::defaults().list,
++        );
++        view.handle_key_event(KeyCode::Right.into());
++        view.handle_key_event(KeyCode::Enter.into());
++        assert!(view.is_complete());
++        match rx.try_recv().unwrap() {
++            AppEvent::InfobarSetup { items } => assert_eq!(
++                items,
++                vec![
++                    InfobarItem::BankedResets,
++                    InfobarItem::Status(StatusLineItem::ModelName),
++                ]
++            ),
++            event => panic!("unexpected event: {event:?}"),
++        }
++        assert!(rx.try_recv().is_err());
++    }
++
++    #[test]
++    fn infobar_picker_can_hide_or_cancel() {
++        for key in [KeyCode::Enter, KeyCode::Esc] {
++            let (tx, mut rx) = unbounded_channel();
++            let mut view = InfobarSetupView::new(
++                &[],
++                BTreeMap::new(),
++                AppEventSender::new(tx),
++                RuntimeKeymap::defaults().list,
++            );
++            view.handle_key_event(key.into());
++            assert!(view.is_complete());
++            if key == KeyCode::Enter {
++                assert!(
++                    matches!(rx.try_recv(), Ok(AppEvent::InfobarSetup { items }) if items.is_empty())
++                );
++            } else {
++                assert!(rx.try_recv().is_err());
++            }
++        }
++    }
++
++    #[test]
++    fn infobar_remaining_meter_clamps_and_rounds() {
++        let meter = |label: &str, percent| {
++            InfobarValue::Meter {
++                label: label.into(),
++                percent,
++                suffix: "left",
++                tokens: None,
++            }
++            .full_text()
++        };
++        assert_eq!(meter("5h", 74.6), "5h [████████░░] 75% left");
++        assert_eq!(meter("context", -1.0), "context [░░░░░░░░░░] 0% left");
++        assert_eq!(meter("weekly", 200.0), "weekly [██████████] 100% left");
++        assert_eq!(meter("5h", f64::NAN), "5h unavailable");
++        assert!(
++            Infobar::new(
++                [(
++                    InfobarItem::Status(StatusLineItem::FiveHourLimit),
++                    InfobarValue::Meter {
++                        label: "5h".into(),
++                        percent: f64::INFINITY,
++                        suffix: "left",
++                        tokens: None
++                    },
++                )],
++                None
++            )
++            .is_none()
++        );
++    }
++
++    fn example_infobar() -> Infobar {
++        Infobar::new(
++            [
++                (
++                    InfobarItem::Status(StatusLineItem::ModelWithReasoning),
++                    InfobarValue::Text("gpt-test high".into()),
++                ),
++                (
++                    InfobarItem::Status(StatusLineItem::ContextRemaining),
++                    InfobarValue::Meter {
++                        label: "Context".into(),
++                        percent: 64.0,
++                        suffix: "left",
++                        tokens: Some("100K/256K".into()),
++                    },
++                ),
++                (
++                    InfobarItem::Status(StatusLineItem::FiveHourLimit),
++                    InfobarValue::Meter {
++                        label: "5h".into(),
++                        percent: 75.0,
++                        suffix: "left",
++                        tokens: None,
++                    },
++                ),
++                (
++                    InfobarItem::Status(StatusLineItem::WeeklyLimit),
++                    InfobarValue::Meter {
++                        label: "weekly".into(),
++                        percent: 40.0,
++                        suffix: "left",
++                        tokens: None,
++                    },
++                ),
++                (
++                    InfobarItem::BankedResets,
++                    InfobarValue::Text("Resets 3".into()),
++                ),
++            ],
++            None,
++        )
++        .unwrap()
++    }
++
++    #[test]
++    fn infobar_responsive_layout_preserves_counts_percentages_and_order() {
++        let bar = example_infobar();
++        let mut snapshots = Vec::new();
++        for width in [
++            160, 120, 100, 99, 98, 95, 94, 90, 89, 85, 84, 80, 40, 20, 160,
++        ] {
++            let lines = bar.lines(width, Infobar::MAX_ROWS);
++            let text = lines
++                .iter()
++                .map(ToString::to_string)
++                .collect::<Vec<_>>()
++                .join("\n");
++            assert!(
++                lines
++                    .iter()
++                    .all(|line| line_width(line) <= usize::from(width))
++            );
++            assert_eq!(bar.desired_height(width), lines.len() as u16);
++            let mut tail = text.as_str();
++            for field in [
++                "gpt-test high",
++                "100K/256K",
++                "64% left",
++                "5h",
++                "75% left",
++                "weekly",
++                "40% left",
++                "Resets 3",
++            ] {
++                tail = tail
++                    .split_once(field)
++                    .unwrap_or_else(|| panic!("missing {field}: {text}"))
++                    .1;
++            }
++            snapshots.push(format!("{width} columns\n{text}"));
++        }
++        insta::assert_snapshot!("responsive_infobar", snapshots.join("\n\n"));
++    }
++
++    #[test]
++    fn infobar_short_layout_prioritizes_context_and_quota_over_metadata() {
++        let bar = example_infobar();
++        assert_eq!(
++            bar.lines(40, 1)[0].to_string(),
++            "Context 100K/256K 64% left · 5h 75% left"
++        );
++        assert_eq!(bar.lines(20, 1)[0].to_string(), "100K/256K 64% left …");
++        assert_eq!(bar.height(20, 1), 0);
++        assert_eq!(bar.height(20, 2), 1);
++        assert_eq!(bar.height(20, 10), 5);
++        assert_eq!(bar.height(0, 10), 0);
++        let context = Infobar::new(
++            [(
++                InfobarItem::Status(StatusLineItem::ContextRemaining),
++                InfobarValue::Meter {
++                    label: "Context".into(),
++                    percent: 64.0,
++                    suffix: "left",
++                    tokens: Some("100K/256K".into()),
++                },
++            )],
++            None,
++        )
++        .unwrap();
++        assert_eq!(context.lines(20, 1)[0].to_string(), "100K/256K 64% left");
++    }
++
++    #[test]
++    fn infobar_shrinks_meters_then_uses_compact_and_wrapped_text() {
++        let bar = example_infobar();
++        let mut meter_sizes = BTreeSet::new();
++        let mut heights = BTreeSet::new();
++        for width in (1..=180).rev().chain(1..=180) {
++            let lines = bar.lines(width, Infobar::MAX_ROWS);
++            let text = lines
++                .iter()
++                .map(ToString::to_string)
++                .collect::<Vec<_>>()
++                .join("\n");
++            assert!(!lines.is_empty());
++            assert!(lines.len() <= usize::from(Infobar::MAX_ROWS));
++            assert!(
++                lines
++                    .iter()
++                    .all(|line| !line.to_string().is_empty() && !line.to_string().ends_with('·'))
++            );
++            if let Some((_, meter)) = text.split_once('[') {
++                assert_eq!(lines.len(), 1);
++                assert!(
++                    (1..=3).contains(&text.matches('[').count()),
++                    "{width} columns: {text}"
++                );
++                meter_sizes.insert(crate::width::display_width(
++                    meter.split_once(']').unwrap().0,
++                ));
++            } else {
++                heights.insert(lines.len());
++            }
++            assert!(
++                lines
++                    .iter()
++                    .all(|line| line_width(line) <= usize::from(width))
++            );
++        }
++        assert_eq!(
++            meter_sizes,
++            (Infobar::MIN_METER_CELLS..=Infobar::MAX_METER_CELLS).collect()
++        );
++        assert!(heights.contains(&1) && heights.contains(&2) && heights.contains(&5));
++        let text = bar
++            .lines(20, Infobar::MAX_ROWS)
++            .iter()
++            .map(ToString::to_string)
++            .collect::<Vec<_>>()
++            .join("\n");
++        assert!(text.contains("5h 75% left"), "{text}");
++        assert!(text.contains("weekly 40% left"), "{text}");
++        assert!(text.contains("100K/256K 64% left"), "{text}");
++        // Medium widths keep complete text groups on one row.
++        let text = bar.lines(bar.compact_width as u16, 1)[0].to_string();
++        assert!(!text.contains('['), "{text}");
++        for value in ["100K/256K", "64% left", "75% left", "40% left", "Resets 3"] {
++            assert!(text.contains(value), "{text}");
++        }
++    }
++
++    #[test]
++    fn infobar_intermediate_widths_change_one_meter_at_a_time() {
++        let bar = example_infobar();
++        let compact_width = bar.compact_width as u16;
++        let mut previous_sizes = vec![0; bar.fields.len()];
++        let mut expanding = Vec::new();
++        for width in compact_width..=compact_width + 40 {
++            let lines = bar.lines(width, 5);
++            assert_eq!(lines.len(), 1);
++            let text = lines[0].to_string();
++            assert!(line_width(&lines[0]) <= usize::from(width));
++            let groups = text.split(" · ").collect::<Vec<_>>();
++            assert_eq!(groups.len(), bar.fields.len());
++            let sizes = groups
++                .iter()
++                .map(|group| {
++                    group
++                        .split_once('[')
++                        .and_then(|(_, meter)| meter.split_once(']'))
++                        .map_or(0, |(meter, _)| crate::width::display_width(meter))
++                })
++                .collect::<Vec<_>>();
++            for (index, (old, new)) in previous_sizes.iter().zip(&sizes).enumerate() {
++                // Growing the shell never makes an existing meter shrink.
++                assert!(new >= old, "{width} columns, field {index}: {text}");
++                assert!(new - old <= 1 || (*old == 0 && *new == 2));
++            }
++            let active = sizes.iter().filter(|size| **size > 0).count();
++            let budget = usize::from(width - compact_width);
++            assert_eq!(active, (budget / 5).min(3));
++            if active > 0 {
++                assert!(sizes[1] > 0, "context meter must survive longest: {text}");
++            }
++            for value in ["100K/256K", "64% left", "75% left", "40% left", "Resets 3"] {
++                assert!(text.contains(value), "{text}");
++            }
++            previous_sizes = sizes;
++            expanding.push(text);
++        }
++        // Reversing direction uses exactly the same layout, without hysteresis
++        // or a delayed resize timer that could leave an overflowing frame.
++        for (width, expected) in (compact_width..=compact_width + 40).zip(expanding).rev() {
++            assert_eq!(bar.lines(width, 5)[0].to_string(), expected);
++        }
++    }
++
++    #[test]
++    fn infobar_reuses_layout_between_measurement_and_streaming_redraws() {
++        let bar = example_infobar();
++        for width in [160, 120, 100, 95, 90, 80, 40, 20] {
++            let lines = bar.lines(width, 5);
++            let area = Rect::new(0, 0, width, lines.len() as u16);
++            // Keeping the cached lines borrowed also ensures these paths do
++            // not rebuild or mutate the layout on an unchanged viewport.
++            for _ in 0..10 {
++                assert_eq!(bar.desired_height(width), area.height);
++                assert_eq!(bar.height(width, 30), area.height);
++                let mut buffer = Buffer::empty(area);
++                bar.render(area, &mut buffer);
++                assert_eq!(bar.lines(width, area.height).as_ptr(), lines.as_ptr());
++            }
++        }
++    }
++
++    #[test]
++    fn infobar_cached_layout_reflows_after_width_and_row_budget_changes() {
++        let bar = example_infobar();
++        for width in [160, 95, 94, 85, 84, 80, 40, 20, 1, 0, 20, 40, 80, 160] {
++            for rows in [5, 2, 1, 0, 1, 2, 5] {
++                let actual = bar
++                    .lines(width, rows)
++                    .iter()
++                    .map(ToString::to_string)
++                    .collect::<Vec<_>>();
++                let fresh = example_infobar()
++                    .lines(width, rows)
++                    .iter()
++                    .map(ToString::to_string)
++                    .collect::<Vec<_>>();
++                assert_eq!(actual, fresh, "{width} columns, {rows} rows");
++                assert!(actual.len() <= usize::from(rows));
++            }
++        }
++    }
++
++    #[test]
++    fn infobar_preserves_semantic_groups_at_extreme_widths() {
++        let bar = example_infobar();
++        assert!(
++            bar.lines(13, 5)
++                .iter()
++                .any(|line| line.to_string() == "Ctx 64% left")
++        );
++        assert!(
++            bar.lines(13, 5)
++                .iter()
++                .any(|line| line.to_string() == "wk 40% left")
++        );
++        for width in 1..=10 {
++            let lines = bar.lines(width, 1);
++            assert_eq!(lines.len(), 1);
++            let text = lines[0].to_string();
++            assert!(text.starts_with('…') && !text.contains('%'), "{text}");
++        }
++        for (item, value) in [
++            (InfobarItem::BankedResets, "Resets 123"),
++            (InfobarItem::PrimaryReset, "5h resets 12:34 PM"),
++            (InfobarItem::SecondaryReset, "weekly resets Oct 12"),
++        ] {
++            let bar = Infobar::new([(item, InfobarValue::Text(value.into()))], None).unwrap();
++            for width in 1..=30 {
++                let text = bar.lines(width, 1)[0].to_string();
++                assert!(text == value || text == "…", "{width}: {text}");
++            }
++        }
++    }
++
++    #[test]
++    fn infobar_color_disabled_keeps_values_and_meter_glyphs() {
++        let value = || InfobarValue::Meter {
++            label: "Context".into(),
++            percent: 100.0,
++            suffix: "left",
++            tokens: Some("0/256K".into()),
++        };
++        let fields = || {
++            [
++                (
++                    InfobarItem::Status(StatusLineItem::ContextRemaining),
++                    value(),
++                ),
++                (
++                    InfobarItem::BankedResets,
++                    InfobarValue::Text("Resets 0".into()),
++                ),
++            ]
++        };
++        let plain = Infobar::new_with_colors(fields(), None, false).unwrap();
++        let colored = Infobar::new_with_colors(fields(), None, true).unwrap();
++        for width in [160, 40, 20, 13] {
++            let lines = plain.lines(width, 5);
++            assert_eq!(
++                lines.iter().map(ToString::to_string).collect::<Vec<_>>(),
++                colored
++                    .lines(width, 5)
++                    .iter()
++                    .map(ToString::to_string)
++                    .collect::<Vec<_>>()
++            );
++            assert!(
++                lines
++                    .iter()
++                    .flat_map(|line| &line.spans)
++                    .all(|span| span.style.fg.is_none() && span.style.bg.is_none())
++            );
++        }
++        assert!(
++            plain
++                .full_line()
++                .to_string()
++                .contains("[██████████] 100% left")
++        );
++    }
++
++    #[test]
++    fn infobar_clears_stale_cells_when_values_contract_from_wrapped_to_one_row() {
++        let area = Rect::new(0, 0, 40, 5);
++        let mut buf = Buffer::empty(area);
++        example_infobar().render(area, &mut buf);
++        assert_ne!(buf[(0, 1)].symbol(), " ");
++        let shorter = Infobar::new(
++            [(
++                InfobarItem::BankedResets,
++                InfobarValue::Text("Resets 0".into()),
++            )],
++            None,
++        )
++        .unwrap();
++        shorter.render(area, &mut buf);
++        let mut fresh = Buffer::empty(area);
++        shorter.render(area, &mut fresh);
++        assert_eq!(buf, fresh);
++    }
++
++    #[test]
++    fn infobar_render_stays_within_its_area_at_small_widths_and_heights() {
++        let bar = example_infobar();
++        for width in [0, 1, 8, 20, 40, 80, 160] {
++            for height in [0, 1, 3, 5] {
++                let mut buf = Buffer::empty(Rect::new(0, 0, width + 4, height + 4));
++                bar.render(Rect::new(2, 2, width, height), &mut buf);
++                for y in 0..height + 4 {
++                    for x in 0..width + 4 {
++                        if x < 2 || x >= width + 2 || y < 2 || y >= height + 2 {
++                            assert_eq!(buf[(x, y)].symbol(), " ");
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn infobar_wraps_and_truncates_using_terminal_cells() {
++        let bar = Infobar::new(
++            [
++                (
++                    InfobarItem::Status(StatusLineItem::WorkspaceHeadline),
++                    InfobarValue::Text("界界界界".into()),
++                ),
++                (
++                    InfobarItem::BankedResets,
++                    InfobarValue::Text("Resets 3".into()),
++                ),
++            ],
++            None,
++        )
++        .unwrap();
++        assert_eq!(
++            bar.lines(8, 5)
++                .iter()
++                .map(ToString::to_string)
++                .collect::<Vec<_>>(),
++            ["界界界界", "Resets 3"]
++        );
++        assert_eq!(bar.lines(7, 5)[0].to_string(), "界界界…");
++    }
++
++    #[test]
++    fn infobar_handles_long_unicode_model_and_workspace_at_every_width() {
++        let bar = Infobar::new(
++            [
++                (
++                    InfobarItem::Status(StatusLineItem::ModelWithReasoning),
++                    InfobarValue::Text(format!("{} high", "模型🦀e\u{301}".repeat(80))),
++                ),
++                (
++                    InfobarItem::Status(StatusLineItem::CurrentDir),
++                    InfobarValue::Text(format!("/工作/{}", "👩‍💻目录".repeat(80))),
++                ),
++                (
++                    InfobarItem::Status(StatusLineItem::ContextRemaining),
++                    InfobarValue::Meter {
++                        label: "Context".into(),
++                        percent: 0.0,
++                        suffix: "left",
++                        tokens: Some("256K/256K".into()),
++                    },
++                ),
++            ],
++            None,
++        )
++        .unwrap();
++        for width in 1..=240 {
++            for rows in 1..=5 {
++                let lines = bar.lines(width, rows);
++                assert!(!lines.is_empty() && lines.len() <= usize::from(rows));
++                assert!(
++                    lines
++                        .iter()
++                        .all(|line| line_width(line) <= usize::from(width))
++                );
++                if width >= 20 && rows == 1 {
++                    assert!(lines[0].to_string().contains("256K/256K 0% left"));
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn infobar_accepts_footer_aliases_and_reset_fields() {
++        assert_eq!(
++            "model-name".parse::<InfobarItem>(),
++            Ok(InfobarItem::Status(StatusLineItem::ModelName))
++        );
++        assert_eq!(
++            "banked-resets".parse::<InfobarItem>(),
++            Ok(InfobarItem::BankedResets)
++        );
++        assert!("unknown".parse::<InfobarItem>().is_err());
++    }
++}
+diff --git a/codex-rs/tui/src/lib.rs b/codex-rs/tui/src/lib.rs
+index 001c3aa..cd64c2a 100644
+--- a/codex-rs/tui/src/lib.rs
++++ b/codex-rs/tui/src/lib.rs
+@@ -129,6 +129,7 @@ mod copy_input_guard;
+ pub(crate) mod custom_terminal;
+ mod daybreak;
+ mod experimental_features;
++mod infobar;
+ mod markdown_copy;
+ mod permission_discovery;
+ mod pets;
+diff --git a/codex-rs/tui/src/local_settings.rs b/codex-rs/tui/src/local_settings.rs
+index b8c1dba..5c31045 100644
+--- a/codex-rs/tui/src/local_settings.rs
++++ b/codex-rs/tui/src/local_settings.rs
+@@ -73,6 +73,7 @@ impl LocalSettings {
+                 right_click_paste: config.tui_right_click_paste,
+                 alternate_screen: config.tui_alternate_screen,
+                 status_line: config.tui_status_line.clone(),
++                infobar: config.tui_infobar.clone(),
+                 status_line_use_colors: config.tui_status_line_use_colors,
+                 terminal_title: config.tui_terminal_title.clone(),
+                 theme: config.tui_theme.clone(),
+diff --git a/codex-rs/tui/src/local_settings_tests.rs b/codex-rs/tui/src/local_settings_tests.rs
+index 17c6a53..8c2477f 100644
+--- a/codex-rs/tui/src/local_settings_tests.rs
++++ b/codex-rs/tui/src/local_settings_tests.rs
+@@ -7,6 +7,35 @@ use codex_config::types::SessionPickerViewMode;
+ use codex_terminal_detection::Multiplexer;
+ use pretty_assertions::assert_eq;
+ 
++#[tokio::test]
++async fn infobar_survives_configuration_loading_and_reload() -> anyhow::Result<()> {
++    let home = tempfile::tempdir()?;
++    for selected in ["['banked-resets', 'model', 'weekly-limit']", "[]"] {
++        std::fs::write(
++            home.path().join("config.toml"),
++            format!("[tui]\ninfobar = {selected}\n"),
++        )?;
++        let config = ConfigBuilder::default()
++            .codex_home(home.path().to_path_buf())
++            .loader_overrides(LoaderOverrides::without_managed_config_for_tests())
++            .build()
++            .await?;
++        let local = LocalSettings::from(&config);
++        assert_eq!(local.tui.infobar, config.tui_infobar);
++        let expected = if selected == "[]" {
++            vec![]
++        } else {
++            vec![
++                "banked-resets".into(),
++                "model".into(),
++                "weekly-limit".into(),
++            ]
++        };
++        assert_eq!(local.tui.infobar, Some(expected));
++    }
++    Ok(())
++}
++
+ #[tokio::test]
+ async fn launch_screen_mode_survives_configuration_reload() -> anyhow::Result<()> {
+     use crate::transcript_mode::TranscriptMode;
+diff --git a/codex-rs/tui/src/slash_command.rs b/codex-rs/tui/src/slash_command.rs
+index 945041b..c6d4da4 100644
+--- a/codex-rs/tui/src/slash_command.rs
++++ b/codex-rs/tui/src/slash_command.rs
+@@ -61,6 +61,7 @@ pub enum SlashCommand {
+     DebugConfig,
+     Title,
+     Statusline,
++    Infobar,
+     Theme,
+     #[strum(to_string = "pets", serialize = "pet")]
+     Pets,
+@@ -123,6 +124,9 @@ impl SlashCommand {
+             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
+             SlashCommand::Title => "configure which items appear in the terminal title",
+             SlashCommand::Statusline => "configure which items appear in the status line",
++            SlashCommand::Infobar => {
++                "select and order model, usage, and reset information in the top bar"
++            }
+             SlashCommand::Theme => "choose a syntax highlighting theme",
+             SlashCommand::Pets => "choose or hide the terminal pet",
+             SlashCommand::Ps => "list background terminals",
+@@ -290,6 +294,7 @@ impl SlashCommand {
+             | SlashCommand::Plugins
+             | SlashCommand::Title
+             | SlashCommand::Statusline
++            | SlashCommand::Infobar
+             | SlashCommand::AutoReview
+             | SlashCommand::Feedback
+             | SlashCommand::Ide
+@@ -352,6 +357,7 @@ mod tests {
+         assert!(SlashCommand::Ide.available_during_task());
+         assert!(SlashCommand::Title.available_during_task());
+         assert!(SlashCommand::Statusline.available_during_task());
++        assert!(SlashCommand::Infobar.available_during_task());
+         assert!(SlashCommand::Raw.available_during_task());
+         assert!(SlashCommand::Raw.available_in_side_conversation());
+         assert!(SlashCommand::Raw.supports_inline_args());
+diff --git a/codex-rs/tui/src/snapshots/codex_tui__infobar__tests__responsive_infobar.snap b/codex-rs/tui/src/snapshots/codex_tui__infobar__tests__responsive_infobar.snap
+new file mode 100644
+index 0000000..fe688cb
+--- /dev/null
++++ b/codex-rs/tui/src/snapshots/codex_tui__infobar__tests__responsive_infobar.snap
+@@ -0,0 +1,57 @@
++---
++source: tui/src/infobar.rs
++assertion_line: 835
++expression: "snapshots.join(\"\\n\\n\")"
++---
++160 columns
++gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
++
++120 columns
++gpt-test high · Context 100K/256K [██████░░░] 64% left · 5h [███████░░] 75% left · weekly [███░░░░░] 40% left · Resets 3
++
++100 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly [█░] 40% left · Resets 3
++
++99 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
++
++98 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
++
++95 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
++
++94 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h 75% left · weekly 40% left · Resets 3
++
++90 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h 75% left · weekly 40% left · Resets 3
++
++89 columns
++gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left · Resets 3
++
++85 columns
++gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left · Resets 3
++
++84 columns
++gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
++Resets 3
++
++80 columns
++gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
++Resets 3
++
++40 columns
++gpt-test high
++Context 100K/256K 64% left · 5h 75% left
++weekly 40% left · Resets 3
++
++20 columns
++gpt-test high
++100K/256K 64% left
++5h 75% left
++weekly 40% left
++Resets 3
++
++160 columns
++gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
+diff --git a/docs/config.md b/docs/config.md
+index d35b0a8..9048e45 100644
+--- a/docs/config.md
++++ b/docs/config.md
+@@ -6,6 +6,9 @@ For advanced configuration instructions, see [this documentation](https://develo
+ 
+ For a full configuration reference, see [this documentation](https://developers.openai.com/codex/config-reference).
+ 
++Use `[tui].infobar` or `/infobar` to configure the optional top status bar. See
++[Top infobar](infobar.md) for its ordered field identifiers.
++
+ ## Lifecycle hooks
+ 
+ Admins can set top-level `allow_managed_hooks_only = true` in
+diff --git a/docs/infobar.md b/docs/infobar.md
+new file mode 100644
+index 0000000..7e7fdae
+--- /dev/null
++++ b/docs/infobar.md
+@@ -0,0 +1,105 @@
++# Top infobar
++
++Use `/infobar` in the Codex CLI to choose and order information displayed above
++the transcript. The picker uses the same keyboard bindings as `/statusline`:
++up/down to navigate, Space to toggle, left/right to reorder, Enter to save, and
++Esc to cancel. Clear every selection and save to hide the bar.
++
++The bar is opt-in. On first opening the picker, model with reasoning, context
++remaining, primary and secondary usage meters, and banked resets are selected.
++Saving persists the ordered identifiers under `[tui].infobar` in `config.toml`.
++Canceling leaves the current selection untouched.
++
++```toml
++[tui]
++infobar = ["model-with-reasoning", "context-remaining", "five-hour-limit", "weekly-limit", "banked-resets", "primary-reset", "secondary-reset"]
++```
++
++All `/statusline` field identifiers and aliases also work in the infobar.
++Additional identifiers are:
++
++| Identifier        | Value                                                  |
++| ----------------- | ------------------------------------------------------ |
++| `banked-resets`   | Available usage resets reported by the account service |
++| `primary-reset`   | Primary account usage window reset time                |
++| `secondary-reset` | Secondary account usage window reset time              |
++
++Context fields include the current context token count and capacity, such as
++`Context 100K/256K [██████░░░░] 64% left`. The numerator is the latest active
++context, rather than accumulated session usage, and updates after compaction.
++The existing percentage calculation is preserved, including its reserved token
++baseline; it can differ from the raw token ratio. `context-used` displays the
++same counts with the percentage used. Until both usage and capacity are known,
++the field reads `Context unknown`; pending token updates read `Context pending`.
++Invalid usage or capacity reads `Context unavailable`. A measured zero still
++displays `0/capacity` and its actual percentage.
++
++Context and usage-limit fields include a ten-cell meter at wider widths. Meter
++lengths shrink down to two cells according to measured terminal display widths.
++Widths between full and compact layouts distribute spare columns one cell at
++a time. When all minimum-size meters no longer fit, quota meters disappear
++individually, retaining the context meter longest. Text values remain in their
++configured positions. Other meters do not grow as the terminal shrinks.
++Once even the context meter no longer fits, the bar switches to text-only
++groups, first on one row and then wrapped between complete groups. Expanding
++restores meters automatically. Colors, labels, percentages, and selected order
++stay consistent across these formats; `NO_COLOR` retains readable text and
++meter glyphs without foreground or background colors.
++Limit labels follow the actual account window duration,
++including daily limits. Unavailable information is omitted; an unknown reset
++count is distinct from a known count of zero. The bar reads existing account
++refreshes and never consumes resets. Use `/usage` to inspect or spend a reset.
++
++In the default fullscreen transcript, the bar stays pinned at the top when
++scrolling or resizing. In inline scrollback mode it appears above the current
++live viewport. Fields wrap in the selected order, using up to five rows. Very
++narrow layouts shorten the context label while preserving its counts and
++percentage. Individual text fields too wide for a row end with an ellipsis;
++selections exceeding the available rows omit lower-priority metadata before
++context and quota values, preserving the retained fields' order. An overflow
++indicator appears when space permits. At extreme widths the token ratio can
++yield to a complete labeled percentage; `Ctx` and `wk` abbreviate labels only
++when needed. If no complete metric fits, an ellipsis replaces that group rather
++than cutting a number or its `left`/`used` qualifier. Expanding
++the shell restores the detailed layout automatically. On very short terminals
++the bar yields space to the composer and transcript. Fullscreen modal
++views retain their normal input ownership.
++
++`Resets 0` means the account service reported zero available banked resets; it
++does not count elapsed reset cycles. Window reset times use separate fields.
++Selecting both `model-with-reasoning` and `reasoning` intentionally repeats the
++effort. The `permissions` field can read `Workspace`, meaning workspace-write
++permissions without network access. Use `current-dir` or `project-root` for a
++directory name. These fields remain independently configurable.
++
++The infobar shares cached state and existing refresh events with the footer and
++`/usage`; resizing does not request account data. Failed account refreshes retain
++the last valid values without an infobar-specific stale badge. Successful reads
++with missing values omit those fields, and account changes invalidate account
++data. Selecting remote workspace headlines uses the existing authenticated,
++interval-limited headline refresh. There is no additional polling loop.
++
++Automatic presentation is the only mode. Visibility and ordering use the
++existing picker and configuration list; forced presentation modes are deferred.
++Measured layouts are reused between height calculation and redraws until the
++width or visible values change. A bounded additional layout handles short
++viewports, while the native synchronized terminal draw continues to own output.
++
++## Local testing before publishing
++
++From `codex-rs`, run:
++
++```bash
++export RUST_MIN_STACK=8388608 # Match the repository's test runner and CI.
++cargo test -p codex-tui --lib infobar
++cargo test -p codex-config infobar
++cargo test -p codex-tui --lib settings_picker
++cargo build -p codex-cli --bin codex
++./target/debug/codex -c 'tui.infobar=["model-with-reasoning","context-remaining","five-hour-limit","weekly-limit","banked-resets"]'
++```
++
++The final command launches the locally built CLI without replacing an installed
++Codex executable. The command-line override lasts for that launch; using the
++picker to save writes configuration normally. To keep testing separate from
++your regular settings, use a separate `CODEX_HOME` directory and sign in there.
++No push or pull request is needed for any of these tests.
+diff --git a/docs/slash_commands.md b/docs/slash_commands.md
+index 4db63f7..33b98ec 100644
+--- a/docs/slash_commands.md
++++ b/docs/slash_commands.md
+@@ -1,3 +1,6 @@
+ # Slash commands
+ 
+ For an overview of Codex CLI slash commands, see [this documentation](https://developers.openai.com/codex/cli/slash-commands).
++
++`/infobar` opens the local picker for the optional top status bar. See
++[Top infobar](infobar.md) for fields, ordering, configuration, and local testing.

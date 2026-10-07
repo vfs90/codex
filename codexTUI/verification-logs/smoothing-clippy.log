@@ -1,0 +1,20 @@
+warning: returning the result of a `let` binding from a block
+   --> app-server/src/message_processor.rs:372:21
+    |
+370 | /                     let time_provider =
+371 | |                         app_server_time_provider(outgoing.clone(), thread_state_manager.clone());
+    | |_________________________________________________________________________________________________- unnecessary `let` binding
+372 |                       time_provider
+    |                       ^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.95.0/index.html#let_and_return
+    = note: `#[warn(clippy::let_and_return)]` on by default
+help: return the expression directly
+    |
+370 ~
+371 ~                     (app_server_time_provider(outgoing.clone(), thread_state_manager.clone())) as _
+    |
+
+warning: `codex-app-server` (lib) generated 1 warning (run `cargo clippy --fix --lib -p codex-app-server -- ` to apply 1 suggestion)
+    Checking codex-tui v0.0.0 (/work/codex-rs/tui)
+    Finished `dev` profile [unoptimized] target(s) in 1m 37s

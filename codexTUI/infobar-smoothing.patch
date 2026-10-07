@@ -1,0 +1,471 @@
+diff --git a/codex-rs/tui/src/chatwidget/rendering_tests.rs b/codex-rs/tui/src/chatwidget/rendering_tests.rs
+index f212cb7..bdc5ddb 100644
+--- a/codex-rs/tui/src/chatwidget/rendering_tests.rs
++++ b/codex-rs/tui/src/chatwidget/rendering_tests.rs
+@@ -132,6 +132,7 @@ fn contains_text(buffer: &Buffer, text: &str) -> bool {
+ #[tokio::test]
+ async fn infobar_resize_during_streaming_preserves_prompt_entry_and_footer() {
+     use crate::infobar::InfobarItem;
++    use codex_app_server_protocol::RateLimitWindow;
+     let (mut widget, _, mut events, mut operations) = make_chatwidget_manual_with_sender().await;
+     widget.thread_id = Some(ThreadId::new());
+     widget.set_token_info(Some(TokenUsageInfo {
+@@ -142,8 +143,31 @@ async fn infobar_resize_during_streaming_preserves_prompt_entry_and_footer() {
+         },
+         model_context_window: Some(256_000),
+     }));
++    widget.on_rate_limit_snapshot(Some(RateLimitSnapshot {
++        limit_id: None,
++        limit_name: None,
++        normal_model_slug: None,
++        primary: Some(RateLimitWindow {
++            used_percent: 25,
++            window_duration_mins: Some(5 * 60),
++            resets_at: None,
++        }),
++        secondary: Some(RateLimitWindow {
++            used_percent: 60,
++            window_duration_mins: Some(7 * 24 * 60),
++            resets_at: None,
++        }),
++        credits: None,
++        individual_limit: None,
++        plan_type: None,
++        spend_control_reached: None,
++        rate_limit_reached_type: None,
++    }));
+     widget.setup_infobar(vec![
++        InfobarItem::Status(StatusLineItem::ModelWithReasoning),
+         InfobarItem::Status(StatusLineItem::ContextRemaining),
++        InfobarItem::Status(StatusLineItem::FiveHourLimit),
++        InfobarItem::Status(StatusLineItem::WeeklyLimit),
+         InfobarItem::BankedResets,
+     ]);
+     widget.set_infobar_reset_count(Some(0));
+@@ -151,9 +175,12 @@ async fn infobar_resize_during_streaming_preserves_prompt_entry_and_footer() {
+     widget.on_task_started();
+     let mut draft = String::new();
+     let mut committed_output = String::new();
+-    for (step, width) in [160, 50, 49, 48, 47, 40, 20, 21, 40, 80, 160]
+-        .into_iter()
+-        .enumerate()
++    for (step, width) in [
++        160, 110, 107, 106, 102, 101, 97, 96, 90, 40, 20, 40, 90, 96, 97, 101, 102, 106, 107, 110,
++        160,
++    ]
++    .into_iter()
++    .enumerate()
+     {
+         widget.on_agent_message_delta(format!("Stream line {step}\n"));
+         widget.on_commit_tick();
+@@ -188,6 +215,10 @@ async fn infobar_resize_during_streaming_preserves_prompt_entry_and_footer() {
+             header.contains("100K/256K") && header.contains("64% left"),
+             "{header}"
+         );
++        assert!(
++            header.contains("75% left") && header.contains("40% left"),
++            "{header}"
++        );
+         // The top strip does not replace or modify the native bottom surface.
+         let bottom =
+             widget.bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions::default());
+diff --git a/codex-rs/tui/src/infobar.rs b/codex-rs/tui/src/infobar.rs
+index d7b69b2..4e378e4 100644
+--- a/codex-rs/tui/src/infobar.rs
++++ b/codex-rs/tui/src/infobar.rs
+@@ -4,6 +4,8 @@
+ //! read the account state already used by `/usage`; displaying them never spends
+ //! a reset or starts a separate polling loop.
+ 
++use std::cell::Ref;
++use std::cell::RefCell;
+ use std::collections::BTreeMap;
+ use std::collections::BTreeSet;
+ use std::fmt;
+@@ -243,14 +245,26 @@ impl InfobarValue {
+ struct InfobarField {
+     item: InfobarItem,
+     compact: Line<'static>,
++    compact_width: usize,
+     meters: Vec<Line<'static>>,
+     narrow: Vec<Line<'static>>,
+ }
+ 
++#[derive(Default)]
++struct InfobarLayoutCache {
++    width: Option<u16>,
++    full: Vec<Line<'static>>,
++    constrained_rows: u16,
++    constrained: Vec<Line<'static>>,
++}
++
+ /// Styled field variants are cached with runtime values; layout uses terminal cells.
+ pub(crate) struct Infobar {
+     fields: Vec<InfobarField>,
+     separator: Span<'static>,
++    compact_width: usize,
++    meter_fields: Vec<usize>,
++    layout: RefCell<InfobarLayoutCache>,
+ }
+ 
+ fn infobar_colors_enabled() -> bool {
+@@ -298,13 +312,20 @@ impl Infobar {
+                     style.bg = None;
+                 }
+                 let styled = |text| Line::from(Span::styled(text, style));
++                let compact = styled(value.text(0, InfobarLabel::Full));
++                let compact_width = line_width(&compact);
+                 InfobarField {
+                     item,
+-                    compact: styled(value.text(0, InfobarLabel::Full)),
+-                    meters: (Self::MIN_METER_CELLS..=Self::MAX_METER_CELLS)
+-                        .rev()
+-                        .map(|cells| styled(value.text(cells, InfobarLabel::Full)))
+-                        .collect(),
++                    compact,
++                    compact_width,
++                    meters: if matches!(value, InfobarValue::Meter { .. }) {
++                        (Self::MIN_METER_CELLS..=Self::MAX_METER_CELLS)
++                            .rev()
++                            .map(|cells| styled(value.text(cells, InfobarLabel::Full)))
++                            .collect()
++                    } else {
++                        Vec::new()
++                    },
+                     narrow: value.narrow_texts().into_iter().map(styled).collect(),
+                 }
+             })
+@@ -314,12 +335,40 @@ impl Infobar {
+         } else {
+             Span::raw(" · ")
+         };
+-        (!fields.is_empty()).then_some(Self { fields, separator })
++        let compact_width = fields
++            .iter()
++            .map(|field| field.compact_width)
++            .sum::<usize>()
++            + fields.len().saturating_sub(1) * crate::width::display_width(&separator.content);
++        let mut meter_fields = fields
++            .iter()
++            .enumerate()
++            .filter_map(|(index, field)| (!field.meters.is_empty()).then_some(index))
++            .collect::<Vec<_>>();
++        // Keep context's visual meter longest, then quotas in configured order.
++        // This changes decoration only: every field stays in its selected position.
++        meter_fields.sort_by_key(|index| {
++            !matches!(
++                fields[*index].item,
++                InfobarItem::Status(StatusLineItem::ContextRemaining | StatusLineItem::ContextUsed)
++            )
++        });
++        (!fields.is_empty()).then_some(Self {
++            fields,
++            separator,
++            compact_width,
++            meter_fields,
++            layout: RefCell::default(),
++        })
+     }
+ 
+     #[cfg(test)]
+     pub(crate) fn full_line(&self) -> Line<'static> {
+-        self.join(self.fields.iter().map(|field| field.meters[0].clone()))
++        self.join(
++            self.fields
++                .iter()
++                .map(|field| field.meters.first().unwrap_or(&field.compact).clone()),
++        )
+     }
+ 
+     fn join(&self, fields: impl IntoIterator<Item = Line<'static>>) -> Line<'static> {
+@@ -333,23 +382,71 @@ impl Infobar {
+         Line::from(spans)
+     }
+ 
+-    fn lines(&self, width: u16, max_rows: u16) -> Vec<Line<'static>> {
++    fn lines(&self, width: u16, max_rows: u16) -> Ref<'_, [Line<'static>]> {
++        let max_rows = max_rows.min(Self::MAX_ROWS);
++        if self.layout.borrow().width != Some(width) {
++            let full = self.layout_lines(width, Self::MAX_ROWS);
++            self.layout.replace(InfobarLayoutCache {
++                width: Some(width),
++                full,
++                ..Default::default()
++            });
++        }
++        let needs_constrained = {
++            let cache = self.layout.borrow();
++            cache.full.len() > usize::from(max_rows) && cache.constrained_rows != max_rows
++        };
++        if needs_constrained {
++            let lines = self.layout_lines(width, max_rows);
++            let mut cache = self.layout.borrow_mut();
++            cache.constrained_rows = max_rows;
++            cache.constrained = lines;
++        }
++        Ref::map(self.layout.borrow(), |cache| {
++            if cache.full.len() <= usize::from(max_rows) {
++                cache.full.as_slice()
++            } else {
++                cache.constrained.as_slice()
++            }
++        })
++    }
++
++    fn layout_lines(&self, width: u16, max_rows: u16) -> Vec<Line<'static>> {
+         if width == 0 || max_rows == 0 {
+             return Vec::new();
+         }
+         let width = usize::from(width);
+         let max_rows = usize::from(max_rows.min(Self::MAX_ROWS));
+-        // Content measurements determine every boundary. Keep the existing
+-        // full, text-only compact, and wrapped appearances in that order.
+-        for detail in 0..=Self::MAX_METER_CELLS - Self::MIN_METER_CELLS {
+-            let line = self.join(self.fields.iter().map(|field| field.meters[detail].clone()));
+-            if line_width(&line) <= width {
+-                return vec![line];
++        if self.compact_width <= width {
++            let budget = width - self.compact_width;
++            let minimum_cost = Self::MIN_METER_CELLS + crate::width::display_width(" []");
++            let visible = self.meter_fields.len().min(budget / minimum_cost);
++            let mut details = vec![None; self.fields.len()];
++            if visible > 0 {
++                // Grow one cell at a time once every meter fits. Below that
++                // boundary, remove minimum-size meters individually without
++                // growing the others as the terminal shrinks.
++                let extra = if visible == self.meter_fields.len() {
++                    budget - visible * minimum_cost
++                } else {
++                    0
++                };
++                let growth = (extra / visible).min(Self::MAX_METER_CELLS - Self::MIN_METER_CELLS);
++                for (position, index) in self.meter_fields.iter().take(visible).enumerate() {
++                    let cells =
++                        (Self::MIN_METER_CELLS + growth + usize::from(position < extra % visible))
++                            .min(Self::MAX_METER_CELLS);
++                    details[*index] = Some(Self::MAX_METER_CELLS - cells);
++                }
+             }
+-        }
+-        let compact = self.join(self.fields.iter().map(|field| field.compact.clone()));
+-        if line_width(&compact) <= width {
+-            return vec![compact];
++            return vec![
++                self.join(self.fields.iter().enumerate().map(|(index, field)| {
++                    details[index]
++                        .map(|detail| &field.meters[detail])
++                        .unwrap_or(&field.compact)
++                        .clone()
++                })),
++            ];
+         }
+         let mut selected = (0..self.fields.len()).collect::<Vec<_>>();
+         let mut rows = self.pack_fields(width, &selected);
+@@ -458,7 +555,7 @@ impl Renderable for Infobar {
+ 
+     fn render(&self, area: Rect, buf: &mut Buffer) {
+         Clear.render(area, buf);
+-        for (offset, line) in self.lines(area.width, area.height).into_iter().enumerate() {
++        for (offset, line) in self.lines(area.width, area.height).iter().enumerate() {
+             Widget::render(
+                 line,
+                 Rect::new(area.x, area.y + offset as u16, area.width, 1),
+@@ -702,7 +799,9 @@ mod tests {
+     fn infobar_responsive_layout_preserves_counts_percentages_and_order() {
+         let bar = example_infobar();
+         let mut snapshots = Vec::new();
+-        for width in [160, 120, 100, 90, 80, 40, 20, 160] {
++        for width in [
++            160, 120, 100, 99, 98, 95, 94, 90, 89, 85, 84, 80, 40, 20, 160,
++        ] {
+             let lines = bar.lines(width, Infobar::MAX_ROWS);
+             let text = lines
+                 .iter()
+@@ -785,7 +884,10 @@ mod tests {
+             );
+             if let Some((_, meter)) = text.split_once('[') {
+                 assert_eq!(lines.len(), 1);
+-                assert_eq!(text.matches('[').count(), 3, "{width} columns: {text}");
++                assert!(
++                    (1..=3).contains(&text.matches('[').count()),
++                    "{width} columns: {text}"
++                );
+                 meter_sizes.insert(crate::width::display_width(
+                     meter.split_once(']').unwrap().0,
+                 ));
+@@ -813,13 +915,98 @@ mod tests {
+         assert!(text.contains("weekly 40% left"), "{text}");
+         assert!(text.contains("100K/256K 64% left"), "{text}");
+         // Medium widths keep complete text groups on one row.
+-        let text = bar.lines(90, 1)[0].to_string();
++        let text = bar.lines(bar.compact_width as u16, 1)[0].to_string();
+         assert!(!text.contains('['), "{text}");
+         for value in ["100K/256K", "64% left", "75% left", "40% left", "Resets 3"] {
+             assert!(text.contains(value), "{text}");
+         }
+     }
+ 
++    #[test]
++    fn infobar_intermediate_widths_change_one_meter_at_a_time() {
++        let bar = example_infobar();
++        let compact_width = bar.compact_width as u16;
++        let mut previous_sizes = vec![0; bar.fields.len()];
++        let mut expanding = Vec::new();
++        for width in compact_width..=compact_width + 40 {
++            let lines = bar.lines(width, 5);
++            assert_eq!(lines.len(), 1);
++            let text = lines[0].to_string();
++            assert!(line_width(&lines[0]) <= usize::from(width));
++            let groups = text.split(" · ").collect::<Vec<_>>();
++            assert_eq!(groups.len(), bar.fields.len());
++            let sizes = groups
++                .iter()
++                .map(|group| {
++                    group
++                        .split_once('[')
++                        .and_then(|(_, meter)| meter.split_once(']'))
++                        .map_or(0, |(meter, _)| crate::width::display_width(meter))
++                })
++                .collect::<Vec<_>>();
++            for (index, (old, new)) in previous_sizes.iter().zip(&sizes).enumerate() {
++                // Growing the shell never makes an existing meter shrink.
++                assert!(new >= old, "{width} columns, field {index}: {text}");
++                assert!(new - old <= 1 || (*old == 0 && *new == 2));
++            }
++            let active = sizes.iter().filter(|size| **size > 0).count();
++            let budget = usize::from(width - compact_width);
++            assert_eq!(active, (budget / 5).min(3));
++            if active > 0 {
++                assert!(sizes[1] > 0, "context meter must survive longest: {text}");
++            }
++            for value in ["100K/256K", "64% left", "75% left", "40% left", "Resets 3"] {
++                assert!(text.contains(value), "{text}");
++            }
++            previous_sizes = sizes;
++            expanding.push(text);
++        }
++        // Reversing direction uses exactly the same layout, without hysteresis
++        // or a delayed resize timer that could leave an overflowing frame.
++        for (width, expected) in (compact_width..=compact_width + 40).zip(expanding).rev() {
++            assert_eq!(bar.lines(width, 5)[0].to_string(), expected);
++        }
++    }
++
++    #[test]
++    fn infobar_reuses_layout_between_measurement_and_streaming_redraws() {
++        let bar = example_infobar();
++        for width in [160, 120, 100, 95, 90, 80, 40, 20] {
++            let lines = bar.lines(width, 5);
++            let area = Rect::new(0, 0, width, lines.len() as u16);
++            // Keeping the cached lines borrowed also ensures these paths do
++            // not rebuild or mutate the layout on an unchanged viewport.
++            for _ in 0..10 {
++                assert_eq!(bar.desired_height(width), area.height);
++                assert_eq!(bar.height(width, 30), area.height);
++                let mut buffer = Buffer::empty(area);
++                bar.render(area, &mut buffer);
++                assert_eq!(bar.lines(width, area.height).as_ptr(), lines.as_ptr());
++            }
++        }
++    }
++
++    #[test]
++    fn infobar_cached_layout_reflows_after_width_and_row_budget_changes() {
++        let bar = example_infobar();
++        for width in [160, 95, 94, 85, 84, 80, 40, 20, 1, 0, 20, 40, 80, 160] {
++            for rows in [5, 2, 1, 0, 1, 2, 5] {
++                let actual = bar
++                    .lines(width, rows)
++                    .iter()
++                    .map(ToString::to_string)
++                    .collect::<Vec<_>>();
++                let fresh = example_infobar()
++                    .lines(width, rows)
++                    .iter()
++                    .map(ToString::to_string)
++                    .collect::<Vec<_>>();
++                assert_eq!(actual, fresh, "{width} columns, {rows} rows");
++                assert!(actual.len() <= usize::from(rows));
++            }
++        }
++    }
++
+     #[test]
+     fn infobar_preserves_semantic_groups_at_extreme_widths() {
+         let bar = example_infobar();
+diff --git a/codex-rs/tui/src/snapshots/codex_tui__infobar__tests__responsive_infobar.snap b/codex-rs/tui/src/snapshots/codex_tui__infobar__tests__responsive_infobar.snap
+index cbd86e1..fe688cb 100644
+--- a/codex-rs/tui/src/snapshots/codex_tui__infobar__tests__responsive_infobar.snap
++++ b/codex-rs/tui/src/snapshots/codex_tui__infobar__tests__responsive_infobar.snap
+@@ -1,20 +1,42 @@
+ ---
+ source: tui/src/infobar.rs
+-assertion_line: 730
++assertion_line: 835
+ expression: "snapshots.join(\"\\n\\n\")"
+ ---
+ 160 columns
+ gpt-test high · Context 100K/256K [██████░░░░] 64% left · 5h [████████░░] 75% left · weekly [████░░░░░░] 40% left · Resets 3
+ 
+ 120 columns
+-gpt-test high · Context 100K/256K [█████░░░] 64% left · 5h [██████░░] 75% left · weekly [███░░░░░] 40% left · Resets 3
++gpt-test high · Context 100K/256K [██████░░░] 64% left · 5h [███████░░] 75% left · weekly [███░░░░░] 40% left · Resets 3
+ 
+ 100 columns
+ gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly [█░] 40% left · Resets 3
+ 
++99 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
++
++98 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
++
++95 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h [██] 75% left · weekly 40% left · Resets 3
++
++94 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h 75% left · weekly 40% left · Resets 3
++
+ 90 columns
++gpt-test high · Context 100K/256K [█░] 64% left · 5h 75% left · weekly 40% left · Resets 3
++
++89 columns
+ gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left · Resets 3
+ 
++85 columns
++gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left · Resets 3
++
++84 columns
++gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
++Resets 3
++
+ 80 columns
+ gpt-test high · Context 100K/256K 64% left · 5h 75% left · weekly 40% left
+ Resets 3
+diff --git a/docs/infobar.md b/docs/infobar.md
+index 804a099..7e7fdae 100644
+--- a/docs/infobar.md
++++ b/docs/infobar.md
+@@ -36,7 +36,11 @@ displays `0/capacity` and its actual percentage.
+ 
+ Context and usage-limit fields include a ten-cell meter at wider widths. Meter
+ lengths shrink down to two cells according to measured terminal display widths.
+-When decorated groups no longer fit one row, the bar switches to text-only
++Widths between full and compact layouts distribute spare columns one cell at
++a time. When all minimum-size meters no longer fit, quota meters disappear
++individually, retaining the context meter longest. Text values remain in their
++configured positions. Other meters do not grow as the terminal shrinks.
++Once even the context meter no longer fits, the bar switches to text-only
+ groups, first on one row and then wrapped between complete groups. Expanding
+ restores meters automatically. Colors, labels, percentages, and selected order
+ stay consistent across these formats; `NO_COLOR` retains readable text and
+@@ -77,6 +81,9 @@ interval-limited headline refresh. There is no additional polling loop.
+ 
+ Automatic presentation is the only mode. Visibility and ordering use the
+ existing picker and configuration list; forced presentation modes are deferred.
++Measured layouts are reused between height calculation and redraws until the
++width or visible values change. A bounded additional layout handles short
++viewports, while the native synchronized terminal draw continues to own output.
+ 
+ ## Local testing before publishing
+ 
